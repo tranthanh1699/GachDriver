@@ -22,7 +22,6 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "dev_gpio.h"
-#include "dev_gpio_board_cfg.h"
 #include "dev_common.h"
 /* USER CODE END Includes */
 
@@ -93,23 +92,19 @@ int main(void)
   MX_GPIO_Init();
   /* USER CODE BEGIN 2 */
 
-  /* ── dev_gpio example: blink PB0 and PB1 alternately ── */
+  /* ── dev_gpio simplified wrapper: blink both LEDs ── */
   {
       dev_err_t err;
 
-      err = dev_gpio_init(&g_dev_gpio_config);
+      err = dev_gpio_init();
       if (err != DEV_OK)
       {
-          /* Initialization failed — halt for debug inspection */
           Error_Handler();
       }
 
-      /*
-       * Start with PB0 HIGH, PB1 LOW.
-       * Both are configured as OUTPUT with default LOW in board config.
-       */
-      (void)dev_gpio_write(DEV_GPIO_CHANNEL_PB0, DEV_GPIO_LEVEL_HIGH);
-      (void)dev_gpio_write(DEV_GPIO_CHANNEL_PB1, DEV_GPIO_LEVEL_LOW);
+      /* Configure both pins as outputs */
+      (void)dev_gpio_output(DEV_GPIO_LED_STATUS);
+      (void)dev_gpio_output(DEV_GPIO_BUTTON_USER);
   }
 
   /* USER CODE END 2 */
@@ -122,19 +117,10 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     {
-        /*
-         * Blink PB0 and PB1 alternately:
-         *   LED on PB0 toggles, LED on PB1 toggles opposite.
-         *   Result: alternating blink pattern (PB0 HIGH → PB1 LOW → PB0 LOW → PB1 HIGH → ...)
-         */
-        (void)dev_gpio_toggle(DEV_GPIO_CHANNEL_PB0);
-        (void)dev_gpio_toggle(DEV_GPIO_CHANNEL_PB1);
+        (void)dev_gpio_toggle(DEV_GPIO_LED_STATUS);
+        (void)dev_gpio_toggle(DEV_GPIO_BUTTON_USER);
 
-        /* Simple busy-wait delay (~500 ms at default HCLK) */
-        for (volatile uint32_t d = 0U; d < 5000000U; d++)
-        {
-            /* nop */
-        }
+        for (volatile uint32_t d = 0U; d < 5000000U; d++) { /* ~500ms */ }
     }
   }
   /* USER CODE END 3 */
