@@ -27,6 +27,15 @@ static int g_passes   = 0;
     }                                                       \
 } while (false)
 
+#define CHECK_EQ_PTR(a, b, msg) do {                       \
+    if ((a) != (b)) {                                      \
+        printf("  FAIL: %s (expected %p, got %p) (%s:%d)\n", \
+               msg, (void*)(b), (void*)(a), __FILE__, __LINE__); \
+        g_failures++;                                      \
+        return;                                             \
+    }                                                       \
+} while (false)
+
 #define RUN_TEST(name) do {                                \
     printf("  test_%s...\n", #name);                       \
     dev_gpio_port_mock_clear_error();                       \
@@ -101,7 +110,7 @@ TEST(3_init_null_channels)
 TEST(4_init_zero_channels)
 {
     dev_err_t err;
-    dev_gpio_channel_config_t ch = {{0}};
+    dev_gpio_channel_config_t ch = {0};
     dev_gpio_config_t bad_cfg = { &ch, 0U };
     setup();
     err = dev_gpio_init(&bad_cfg);
@@ -113,7 +122,8 @@ TEST(4_init_zero_channels)
 TEST(5_init_too_many_channels)
 {
     dev_err_t err;
-    dev_gpio_config_t bad_cfg = { NULL, DEV_GPIO_CFG_MAX_CHANNELS + 1U };
+    dev_gpio_channel_config_t ch = {0};
+    dev_gpio_config_t bad_cfg = { &ch, DEV_GPIO_CFG_MAX_CHANNELS + 1U };
     setup();
     err = dev_gpio_init(&bad_cfg);
     CHECK_EQ(err, DEV_ERR_INVALID_ARG, "too many channels should fail");
@@ -434,7 +444,7 @@ TEST(27_enable_interrupt_and_trigger)
     dev_gpio_port_mock_trigger_isr(DEV_GPIO_CHANNEL_BUTTON_USER);
     CHECK_EQ(g_isr_call_count, 1, "callback should be called once");
     CHECK_EQ(g_last_isr_channel, DEV_GPIO_CHANNEL_BUTTON_USER, "correct channel");
-    CHECK_EQ(g_last_isr_arg, (void *)0xABCDU, "correct user arg");
+    CHECK_EQ_PTR(g_last_isr_arg, (void *)0xABCDU, "correct user arg");
     (void)dev_gpio_deinit();
     printf("    PASS\n"); g_passes++;
 }

@@ -20,7 +20,7 @@ static uint16_t dev_gpio_find_index(dev_gpio_channel_t channel)
 {
     uint16_t i;
     if (g_config == NULL) {
-        return 0U;
+        return DEV_GPIO_CFG_MAX_CHANNELS;
     }
     for (i = 0U; i < g_config->channel_count; i++) {
         if (g_config->channels[i].channel == channel) {
@@ -481,6 +481,10 @@ void dev_gpio_dispatch_isr(dev_gpio_channel_t channel)
     uint16_t idx;
     dev_gpio_isr_callback_t cb;
     void *arg;
+
+    if (g_config == NULL) {
+        return;
+    }
 
     idx = dev_gpio_find_index(channel);
     if (idx >= g_config->channel_count) {
