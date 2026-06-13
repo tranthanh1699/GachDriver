@@ -16,16 +16,25 @@ Application (main.c)
    │  dev_gpio_init();
    │  dev_gpio_output(DEV_GPIO_LED_STATUS);
    ▼
-dev_gpio.c  (common wrapper: validate pin, dispatch to port)
+dev_gpio.c  (thin wrapper: lifecycle, callback table, error mapping, dispatch)
    │  dev_gpio_port_output(pin, level)
    ▼
-dev_gpio_port_<target>.c  (pin mapping table + vendor HAL calls)
+dev_gpio_port_<target>.c  (pin mapping table + pin validation + vendor HAL calls)
    │  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, ...)
    ▼
 Vendor HAL
 ```
 
-No `boards/` folder. Pin mapping lives inside the selected port's `.c` file.
+No `boards/` folder. Pin mapping and pin validation live inside the selected port's `.c` file. The common driver does NOT validate pin IDs — it delegates entirely to the port.
+
+### Logical Pin ID Rule
+
+All logical pin IDs MUST be dense values from 0 to `DEV_GPIO_CFG_MAX_PINS - 1`. This allows:
+- Mock port to use direct array indexing
+- Callback table to use direct array indexing
+- No mapping table lookup in the common layer
+
+This is a deliberate simplification: the port's internal `s_gpio_map[]` maps logical IDs to hardware pins, but the common layer treats pin IDs as array indices.
 
 ## 3. What Gets Removed
 
@@ -53,8 +62,9 @@ No `boards/` folder. Pin mapping lives inside the selected port's `.c` file.
 - `drivers/dev_gpio/port/esp32/dev_gpio_port_esp32.h` — stub
 - `drivers/dev_gpio/port/nrf52/dev_gpio_port_nrf52.c` — stub
 - `drivers/dev_gpio/port/nrf52/dev_gpio_port_nrf52.h` — stub
-- `docs/dev_gpio/README.md` — new documentation
-- Root `README.md` — updated with documentation index
+- `docs/dev_common/README.md` — library reference
+- `docs/dev_gpio/README.md` — library reference
+- Root `README.md` — updated documentation index
 
 ## 6. Types (`dev_gpio_types.h`)
 
@@ -83,12 +93,20 @@ typedef void (*dev_gpio_callback_t)(dev_gpio_pin_t pin, void *user_arg);
 #define DEV_GPIO_CFG_INTERRUPT_ENABLED     (1U)
 #define DEV_GPIO_CFG_RUNTIME_CHECK_ENABLED (1U)
 
-/* Logical pin IDs — project-specific */
+/* Logical pin IDs — dense, 0..MAX_PINS-1. Pin count = highest ID + 1 */
 #define DEV_GPIO_LED_STATUS       ((dev_gpio_pin_t)0U)
 #define DEV_GPIO_BUTTON_USER      ((dev_gpio_pin_t)1U)
+#define DEV_GPIO_PIN_COUNT        (2U)
 ```
 
 Pin IDs live here — one file per project. No board folder.
+
+### Feature Switch: `DEV_GPIO_CFG_INTERRUPT_ENABLED`
+
+| Value | Behavior |
+|-------|----------|
+| `1U` | `dev_gpio_interrupt()`, `interrupt_enable()`, `interrupt_disable()` fully functional. Callback table allocated and active. `dev_gpio_dispatch_isr()` checks enabled state and invokes callbacks. |
+| `0U` | Above APIs compile and link but return `DEV_ERR_NOT_SUPPORTED`. `dev_gpio_dispatch_isr()` compiles as a no-op. Callback table may be compiled out or left unused. |
 
 ## 8. Public API (`dev_gpio.h`)
 
@@ -124,36 +142,29 @@ dev_err_t dev_gpio_interrupt_enable(dev_gpio_pin_t pin);
 dev_err_t dev_gpio_interrupt_disable(dev_gpio_pin_t pin);
 ```
 
-### API Behavior
+### Per-API Behavior
 
-**dev_gpio_init:**
-- Calls `dev_gpio_port_init()` (port enables clocks)
-- Sets state to INITIALIZED
-- If already initialized → `DEV_ERR_ALREADY_INITIALIZED`
-- If port init fails → `DEV_ERR_HW_FAILURE`
+| API | Not Init | Invalid Arg | Null Ptr | Unsupported | Port Fail | Notes |
+|-----|----------|-------------|----------|-------------|-----------|-------|
+| `init()` | ALREADY_INIT | — | — | — | HW_FAILURE | Calls port_init, sets state on success |
+| `deinit()` | NOT_INIT | — | — | — | HW_FAILURE | Clears callbacks, forces UNINIT |
+| `is_initialized()` | — | — | — | — | — | ISR-safe |
+| `input(pin)` | NOT_INIT | INVALID_ARG | — | NOT_SUPPORTED | HW_FAILURE | Dispatches to port_input(pin, NONE) |
+| `input_pullup(pin)` | NOT_INIT | INVALID_ARG | — | NOT_SUPPORTED | HW_FAILURE | Dispatches to port_input(pin, UP) |
+| `input_pulldown(pin)` | NOT_INIT | INVALID_ARG | — | NOT_SUPPORTED | HW_FAILURE | Dispatches to port_input(pin, DOWN) |
+| `output(pin)` | NOT_INIT | INVALID_ARG | — | NOT_SUPPORTED | HW_FAILURE | Default LOW |
+| `output_level(pin, lvl)` | NOT_INIT | INVALID_ARG | — | NOT_SUPPORTED | HW_FAILURE | lvl not LOW/HIGH → INVALID_ARG |
+| `read(pin, *lvl)` | NOT_INIT | INVALID_ARG | NULL_PTR | — | HW_FAILURE | Reads into local temp; *lvl unchanged on fail |
+| `write(pin, lvl)` | NOT_INIT | INVALID_ARG | — | — | HW_FAILURE | Invalid level enum → INVALID_ARG |
+| `toggle(pin)` | NOT_INIT | INVALID_ARG | — | — | HW_FAILURE | — |
+| `set_pull(pin, pull)` | NOT_INIT | INVALID_ARG | — | NOT_SUPPORTED | HW_FAILURE | Invalid pull enum → INVALID_ARG |
+| `high(pin)` | NOT_INIT | INVALID_ARG | — | — | HW_FAILURE | Calls write(pin, HIGH) |
+| `low(pin)` | NOT_INIT | INVALID_ARG | — | — | HW_FAILURE | Calls write(pin, LOW) |
+| `interrupt(pin, intr, cb, arg)` | NOT_INIT | INVALID_ARG | NULL_PTR* | NOT_SUPPORTED | HW_FAILURE | *NULL cb allowed only if intr==DISABLE. Stores cb+arg in table. |
+| `interrupt_enable(pin)` | NOT_INIT | INVALID_ARG | — | NOT_SUPPORTED | HW_FAILURE | Marks enabled BEFORE port call; rolls back on fail |
+| `interrupt_disable(pin)` | NOT_INIT | INVALID_ARG | — | — | HW_FAILURE | Marks disabled BEFORE port call; idempotent |
 
-**dev_gpio_output:** Configures pin as output, default LOW.
-
-**dev_gpio_output_level:** Configures pin as output with explicit initial level (avoids glitches).
-
-**dev_gpio_input / input_pullup / input_pulldown:** Configure pin as input with specified pull.
-
-**dev_gpio_read:** Reads into local temp; `*level` written only on success.
-
-**dev_gpio_write:** Validates pin exists, validates level enum, dispatches to port.
-
-**dev_gpio_interrupt:** Combines config + callback registration in one call. Callback may be NULL only if intr is DISABLE.
-
-### Validation and Errors
-
-| Condition | Error |
-|-----------|-------|
-| Pin ID not in port's mapping table | `DEV_ERR_INVALID_ARG` |
-| Null pointer (read level, callback) | `DEV_ERR_NULL_PTR` |
-| Not initialized | `DEV_ERR_NOT_INITIALIZED` |
-| Already initialized | `DEV_ERR_ALREADY_INITIALIZED` |
-| Unsupported pull/intr | `DEV_ERR_NOT_SUPPORTED` |
-| Port failure | `DEV_ERR_HW_FAILURE` |
+**Pin validation:** `INVALID_ARG` means pin >= `DEV_GPIO_CFG_MAX_PINS` or not found in port's mapping table. Common driver checks `pin < MAX_PINS` before dispatching (common owns the dense-ID rule). Port additionally rejects pins not in its internal map.
 
 ## 9. Port Interface (`dev_gpio_port.h`)
 
@@ -177,13 +188,27 @@ Plus the common-driver ISR dispatch:
 void dev_gpio_dispatch_isr(dev_gpio_pin_t pin);   /* PORT-ONLY */
 ```
 
-## 10. Callback Ownership
+## 10. Error Mapping (Common Driver)
 
-Common `dev_gpio.c` owns a static callback table:
+```c
+static dev_err_t dev_gpio_map_port_error(dev_err_t port_err)
+{
+    if (port_err == DEV_OK)                 { return DEV_OK; }
+    if (port_err == DEV_ERR_INVALID_ARG)    { return DEV_ERR_INVALID_ARG; }
+    if (port_err == DEV_ERR_NULL_PTR)       { return DEV_ERR_NULL_PTR; }
+    if (port_err == DEV_ERR_NOT_SUPPORTED)  { return DEV_ERR_NOT_SUPPORTED; }
+    return DEV_ERR_HW_FAILURE;
+}
+```
+
+Preserved: `DEV_OK`, `DEV_ERR_INVALID_ARG`, `DEV_ERR_NULL_PTR`, `DEV_ERR_NOT_SUPPORTED`. All other port errors → `DEV_ERR_HW_FAILURE`.
+
+## 11. Callback Table (Common Driver)
+
+Common `dev_gpio.c` owns a static callback table indexed directly by pin ID:
 
 ```c
 typedef struct {
-    dev_gpio_pin_t      pin;
     dev_gpio_callback_t callback;
     void               *user_arg;
     bool                enabled;
@@ -192,9 +217,54 @@ typedef struct {
 static dev_gpio_callback_entry_t g_callbacks[DEV_GPIO_CFG_MAX_PINS];
 ```
 
-`dev_gpio_interrupt()` stores callback + arg. `dev_gpio_dispatch_isr()` looks up pin, checks enabled, calls callback. Vendor ISR handlers call `dev_gpio_dispatch_isr(pin)`.
+### Callback Table Semantics
 
-## 11. Port Pin Mapping
+**Initialization:** All entries zeroed at startup (static storage). `dev_gpio_init()` does NOT touch the callback table — callbacks survive across init/deinit cycles. This allows re-registering after deinit+reinit.
+
+**`dev_gpio_interrupt(pin, intr, cb, arg)`:**
+1. If `intr == DISABLE` and `cb == NULL`: clear callback entry (cb=NULL, arg=NULL, enabled=false), call port_interrupt(pin, DISABLE)
+2. If `intr != DISABLE` and `cb == NULL`: return `DEV_ERR_NULL_PTR`
+3. If `intr != DISABLE` and `cb != NULL`: store cb + arg in `g_callbacks[pin]` (enabled stays false until `interrupt_enable`), call `port_interrupt(pin, intr)`
+
+**`dev_gpio_interrupt_enable(pin)`:**
+1. Set `g_callbacks[pin].enabled = true`
+2. Call `port_interrupt_enable(pin)`
+3. If port fails: set `g_callbacks[pin].enabled = false`, return error
+
+**`dev_gpio_interrupt_disable(pin)`:**
+1. Set `g_callbacks[pin].enabled = false`
+2. Call `port_interrupt_disable(pin)`
+3. If port fails: enabled stays false (no rollback needed), return error
+
+**`dev_gpio_deinit()`:**
+1. For all pins: set `g_callbacks[pin].enabled = false` (callbacks NOT cleared — see below)
+2. Call `port_deinit()`
+3. Force state to UNINITIALIZED
+
+Callbacks are NOT cleared to NULL on deinit — only disabled. This preserves callback registrations across reinit cycles. If the application wants to clear a callback, it calls `dev_gpio_interrupt(pin, DEV_GPIO_INTR_DISABLE, NULL, NULL)`.
+
+**`dev_gpio_dispatch_isr(pin)`:**
+1. If `pin >= MAX_PINS`: return
+2. If `!g_callbacks[pin].enabled`: return
+3. If `g_callbacks[pin].callback == NULL`: return
+4. Call `g_callbacks[pin].callback(pin, g_callbacks[pin].user_arg)`
+
+## 12. Common Driver (`dev_gpio.c`)
+
+Thin wrapper. Each public API:
+1. If not `g_initialized` → `DEV_ERR_NOT_INITIALIZED`
+2. If `pin >= DEV_GPIO_CFG_MAX_PINS` → `DEV_ERR_INVALID_ARG`
+3. Validate other arguments (level enum, null pointers) where applicable
+4. Dispatch to matching `dev_gpio_port_*()` call
+5. Map port result through `dev_gpio_map_port_error()`
+
+The common driver checks `pin < MAX_PINS`. The port may ADDITIONALLY reject pins not in its internal table. This is not a contradiction — common rejects IDs outside the array range (preventing OOB access), port rejects IDs that are in range but not wired on this hardware.
+
+## 13. Port Pin Mapping
+
+### Logical Pin ID Contract
+
+All pin IDs MUST be dense: 0, 1, 2, ... `DEV_GPIO_CFG_PIN_COUNT - 1`, all < `DEV_GPIO_CFG_MAX_PINS`. This contract is enforced by `dev_gpio_cfg.h` defining the IDs, not by any runtime code.
 
 ### STM32
 
@@ -206,12 +276,12 @@ typedef struct {
 } dev_gpio_hw_pin_t;
 
 static const dev_gpio_hw_pin_t s_gpio_map[] = {
-    { DEV_GPIO_LED_STATUS,  GPIOB, GPIO_PIN_0 },
-    { DEV_GPIO_BUTTON_USER, GPIOC, GPIO_PIN_13 },
+    [DEV_GPIO_LED_STATUS]  = { DEV_GPIO_LED_STATUS,  GPIOB, GPIO_PIN_0 },
+    [DEV_GPIO_BUTTON_USER] = { DEV_GPIO_BUTTON_USER, GPIOC, GPIO_PIN_13 },
 };
 ```
 
-`dev_gpio_port_init()` enables clocks for all ports in the map.
+Designated initializers index by pin ID. `dev_gpio_port_init()` enables clocks for all ports in the map.
 
 ### ESP32 (stub)
 
@@ -220,6 +290,11 @@ typedef struct {
     dev_gpio_pin_t pin_id;
     int            gpio_num;
 } dev_gpio_hw_pin_t;
+
+static const dev_gpio_hw_pin_t s_gpio_map[] = {
+    [DEV_GPIO_LED_STATUS]  = { DEV_GPIO_LED_STATUS,  2 },
+    [DEV_GPIO_BUTTON_USER] = { DEV_GPIO_BUTTON_USER, 0 },
+};
 ```
 
 ### nRF52 (stub)
@@ -229,31 +304,21 @@ typedef struct {
     dev_gpio_pin_t pin_id;
     uint32_t       pin_number;
 } dev_gpio_hw_pin_t;
+
+static const dev_gpio_hw_pin_t s_gpio_map[] = {
+    [DEV_GPIO_LED_STATUS]  = { DEV_GPIO_LED_STATUS,  17U },
+    [DEV_GPIO_BUTTON_USER] = { DEV_GPIO_BUTTON_USER, 13U },
+};
 ```
 
-## 12. Common Driver (`dev_gpio.c`)
+## 14. Mock Port
 
-Thin wrapper. Each public API:
-1. Checks `g_initialized` (return `DEV_ERR_NOT_INITIALIZED`)
-2. Validates pin (iterate port's `s_gpio_map`, return `DEV_ERR_INVALID_ARG` if not found)
-3. For write: validates level enum
-4. Dispatches to matching `dev_gpio_port_*()` call
-5. Returns port result mapped through `dev_gpio_map_port_error()`
+Internal arrays indexed directly by pin ID (valid because pins are dense < MAX_PINS):
 
-The common driver does NOT own the pin map — it calls through to the port for pin validation. Actually, since the common driver doesn't know the pin map (it's in the port), validation must either:
-- (A) be in the port (port returns `DEV_ERR_INVALID_ARG` for unknown pins), or
-- (B) the port exposes a `dev_gpio_port_pin_is_valid(pin)` function
-
-**Decision: Option A.** Port validates pins internally. Common driver just dispatches and maps errors. This keeps the common driver truly thin — it doesn't need to know about hardware pin mapping at all.
-
-Error mapping:
-- `DEV_OK` → `DEV_OK`
-- `DEV_ERR_NOT_SUPPORTED` → `DEV_ERR_NOT_SUPPORTED` (preserved)
-- Any other non-OK → `DEV_ERR_HW_FAILURE`
-
-## 13. Mock Port
-
-Simplified mock. Internal arrays indexed by pin ID (must be < MAX_PINS).
+```c
+static dev_gpio_level_t m_levels[DEV_GPIO_CFG_MAX_PINS];
+static bool             m_is_output[DEV_GPIO_CFG_MAX_PINS];
+```
 
 Error injection:
 ```c
@@ -268,7 +333,9 @@ dev_gpio_level_t dev_gpio_port_mock_get_level(dev_gpio_pin_t pin);
 bool             dev_gpio_port_mock_is_output(dev_gpio_pin_t pin);
 ```
 
-## 14. Build Integration
+Mock validates `pin < MAX_PINS` internally and returns `DEV_ERR_INVALID_ARG` if out of range.
+
+## 15. Build Integration
 
 CMake with port selection:
 
@@ -289,12 +356,50 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 )
 ```
 
-## 15. Documentation
+One port per build. Host tests use `DEV_GPIO_PORT=mock`.
 
-- `docs/dev_gpio/README.md` — full reference
-- Root `README.md` — updated index linking to docs
+## 16. Documentation
 
-## 16. Definition of Done
+- `docs/dev_common/README.md` — dev_common library reference
+- `docs/dev_gpio/README.md` — dev_gpio wrapper reference with porting guide
+- Root `README.md` — updated index linking to both docs
+
+## 17. Test Plan
+
+28 test cases for the simplified wrapper:
+
+| # | Test | Expected |
+|---|------|----------|
+| 1 | init succeeds | DEV_OK, is_initialized() == true |
+| 2 | double init | DEV_ERR_ALREADY_INITIALIZED |
+| 3 | output then high | DEV_OK, level == HIGH |
+| 4 | output then low | DEV_OK, level == LOW |
+| 5 | output_level with HIGH | DEV_OK, level == HIGH (no glitch) |
+| 6 | output_level with LOW | DEV_OK, level == LOW |
+| 7 | input with pull-up, read LOW | DEV_OK (pull-up overridden by mock) |
+| 8 | input_pullup | DEV_OK |
+| 9 | input_pulldown | DEV_OK |
+| 10 | write valid pin | DEV_OK, level matches |
+| 11 | write invalid level | DEV_ERR_INVALID_ARG |
+| 12 | read with NULL pointer | DEV_ERR_NULL_PTR |
+| 13 | read from valid pin | DEV_OK, level returned |
+| 14 | toggle output | DEV_OK, level flips |
+| 15 | set_pull valid | DEV_OK |
+| 16 | high convenience | DEV_OK, level == HIGH |
+| 17 | low convenience | DEV_OK, level == LOW |
+| 18 | interrupt register with callback | DEV_OK |
+| 19 | interrupt with NULL callback + DISABLE | DEV_OK, callback cleared |
+| 20 | interrupt with NULL callback + RISING | DEV_ERR_NULL_PTR |
+| 21 | interrupt enable + trigger | callback invoked with correct pin+arg |
+| 22 | interrupt disable + trigger | callback NOT invoked |
+| 23 | deinit | DEV_OK, is_initialized() == false |
+| 24 | reinit after deinit | DEV_OK |
+| 25 | unknown pin ID (>MAX_PINS) | DEV_ERR_INVALID_ARG |
+| 26 | operation before init | DEV_ERR_NOT_INITIALIZED |
+| 27 | mock error injection | DEV_ERR_HW_FAILURE propagated |
+| 28 | enable interrupt + port fail + rollback | DEV_ERR_HW_FAILURE, enabled stays false |
+
+## 18. Definition of Done
 
 - [ ] All old board folders removed
 - [ ] `dev_gpio` rewritten with simplified API (17 functions)
@@ -305,7 +410,8 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 - [ ] nRF52 stub created
 - [ ] `main.c` updated to new API
 - [ ] CMakeLists.txt updated with port selection
-- [ ] All 36 tests pass against mock port
+- [ ] All 28 tests pass against mock port
 - [ ] No vendor headers in public headers
+- [ ] `docs/dev_common/README.md` written
 - [ ] `docs/dev_gpio/README.md` written
 - [ ] Root `README.md` updated
