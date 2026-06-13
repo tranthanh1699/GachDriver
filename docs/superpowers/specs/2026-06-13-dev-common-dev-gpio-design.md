@@ -398,13 +398,14 @@ dev_err_t dev_gpio_init(const dev_gpio_config_t *config);
 | 6 | For each channel: validate `direction` is a known enum value | DEV_ERR_INVALID_ARG |
 | 7 | For each channel: validate `pull` is a known enum value | DEV_ERR_INVALID_ARG |
 | 8 | For each channel: validate `interrupt` is a known enum value | DEV_ERR_INVALID_ARG |
-| 9 | If `DEV_GPIO_CFG_VALIDATE_DUPLICATES`: detect duplicate channel IDs | DEV_ERR_CONFIG |
-| 10 | Call `dev_gpio_port_init(config)` | DEV_ERR_HW_FAILURE |
-| 11 | For each channel: call `dev_gpio_port_config_channel(&channels[i])` | DEV_ERR_HW_FAILURE |
-| 12 | On port config failure: call `dev_gpio_port_deinit()` for cleanup, remain UNINITIALIZED | — |
-| 13 | Initialize internal callback tables from config | — |
-| 14 | Set state to INITIALIZED | — |
-| 15 | Return DEV_OK | — |
+| 9 | If `DEV_GPIO_CFG_INTERRUPT_ENABLED == 0U`: for each channel, if `interrupt != DEV_GPIO_INTR_DISABLE` | DEV_ERR_NOT_SUPPORTED |
+| 10 | If `DEV_GPIO_CFG_VALIDATE_DUPLICATES`: detect duplicate channel IDs | DEV_ERR_CONFIG |
+| 11 | Call `dev_gpio_port_init(config)` | DEV_ERR_HW_FAILURE |
+| 12 | For each channel: call `dev_gpio_port_config_channel(&channels[i])` | DEV_ERR_HW_FAILURE |
+| 13 | On port config failure: call `dev_gpio_port_deinit()` for cleanup, remain UNINITIALIZED | — |
+| 14 | Initialize internal callback tables from config | — |
+| 15 | Set state to INITIALIZED | — |
+| 16 | Return DEV_OK | — |
 
 #### 4.4.2 dev_gpio_deinit
 
@@ -415,7 +416,7 @@ dev_err_t dev_gpio_deinit(void);
 | Step | Action | Error on failure |
 |------|--------|------------------|
 | 1 | If not initialized | DEV_ERR_NOT_INITIALIZED |
-| 2 | For each channel: disable interrupt via port | (best-effort, error logged but not blocking) |
+| 2 | For each channel: disable interrupt via port | (best-effort; on failure, reported via `dev_assert_report(..., DEV_ASSERT_TYPE_ERROR, ...)` but deinit continues) |
 | 3 | Clear all callback table entries to NULL | — |
 | 4 | Clear common interrupt enable state to disabled | — |
 | 5 | Call `dev_gpio_port_deinit()`, capture return | (captured, not yet returned) |
@@ -751,12 +752,14 @@ dev_gpio_port_mock_clear_error();
 
 Feature switch behavior:
 - `DEV_GPIO_CFG_INTERRUPT_ENABLED`:
-  - `1U`: interrupt APIs (`config_interrupt`, `register_callback`, `enable_interrupt`,
-    `disable_interrupt`, `dispatch_isr`) are fully functional.
-  - `0U`: interrupt APIs still compile and link (stable API surface), but return
-    `DEV_ERR_NOT_SUPPORTED`. The common driver skips internal interrupt state tracking.
-    This allows a port that doesn't support interrupts to compile without dead code
-    while keeping the API consistent across all targets.
+  - `1U`: interrupt APIs are fully functional.
+  - `0U`: Interrupt public APIs (`config_interrupt`, `register_callback`,
+    `enable_interrupt`, `disable_interrupt`) still compile and link (stable API surface),
+    but return `DEV_ERR_NOT_SUPPORTED`. `dev_gpio_dispatch_isr()` compiles as a no-op
+    (returns void, no action). `dev_gpio_init()` rejects any channel whose `.interrupt`
+    field is not `DEV_GPIO_INTR_DISABLE` by returning `DEV_ERR_NOT_SUPPORTED` — a board
+    config must not request interrupt modes when interrupts are compiled out. The common
+    driver skips all internal interrupt state tracking.
 - `DEV_GPIO_CFG_VALIDATE_DUPLICATES`:
   - `1U`: init scans for duplicate channel IDs, returns `DEV_ERR_CONFIG` if found.
   - `0U`: duplicate check is skipped (saves init time on resource-constrained targets).
@@ -895,8 +898,8 @@ All tests run against the mock port on host. 36 test cases:
 | 28 | disable interrupt | DEV_OK, callback not invoked on trigger |
 | 29 | deinit | DEV_OK, is_initialized() == false |
 | 30 | reinit after deinit | DEV_OK |
-| 31 | unsupported intr type | DEV_ERR_NOT_SUPPORTED |
-| 32 | unsupported pull mode | DEV_ERR_NOT_SUPPORTED |
+| 31 | valid interrupt enum, but mode not supported by port (e.g., both-edges) | DEV_ERR_NOT_SUPPORTED |
+| 32 | valid pull enum, but mode not supported by port (e.g., pull-down) | DEV_ERR_NOT_SUPPORTED |
 | 33 | mock error injection: port write fails | DEV_ERR_HW_FAILURE propagated |
 | 34 | mock error injection: port read fails | DEV_ERR_HW_FAILURE, *level unchanged |
 | 35 | enable interrupt: port fails, common rolls back | DEV_ERR_HW_FAILURE, interrupt stays disabled |
@@ -917,21 +920,23 @@ All tests run against the mock port on host. 36 test cases:
 
 ### 8.1 Documented MISRA Deviations
 
-**DEV-MISRA-001: Infinite loop in fatal assert termination.**
+**DEV-MISRA-001: Intentional infinite loop in fatal assert termination.**
 
 The `dev_assert_report()` function with `DEV_ASSERT_TYPE_ASSERT` uses an infinite loop
 (`for (;;) {}`) as the termination mechanism for backends that do not trap or reset
 (NONE, UART, TEXT_BUFFER, USER_HOOK). The `DEV_ASSERT()` macro also contains a `for (;;) {}`
 fallback after the report call.
 
-- **Rule violated**: MISRA C:2012 Rule 14.2 (loop counter shall not be modified) — not
-  strictly violated since there is no counter, but the loop is unbounded.
-- **Justification**: This is intentional fatal behavior. When an assertion fires in a
-  safety-critical embedded system, there is no safe recovery path — the system must stop.
-  The loop provides a deterministic halt point for debugger attachment.
+- **Project rule deviation**: Section 17 rule 3 (no unbounded loops). This is an
+  intentional, documented deviation — not a violation to be fixed.
+- **Justification**: This is fatal safety behavior. When an assertion fires in a
+  safety-critical embedded system, there is no safe recovery path — the system must stop
+  in a deterministic, observable state. The loop provides a stable halt point for
+  debugger attachment (watchdog may optionally be configured to reset).
 - **Mitigation**: The loop is the last resort fallback. The BREAKPOINT backend uses
   `__builtin_trap()` which terminates without looping. The RESET backend calls a
   platform reset hook. Only backends that lack a termination primitive use the loop.
+  The loop is at a single, auditable call site.
 
 ## 9. Definition of Done
 
