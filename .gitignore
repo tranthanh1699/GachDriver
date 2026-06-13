@@ -1,0 +1,49 @@
+o# Build output and generated firmware artifacts
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+*.elf
+*.hex
+*.bin
+*.map
+*.o
+*.obj
+*.d
+*.su
+bl_build_config.h
+bl_pubkey.h
+bl_image_metadata.c
+
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Local IDE/editor metadata
+.clangd
+.vscode/
+.idea/
+*.log
+*.tmp
+*.bak
+
+Image/
+
+# Local agent/tool metadata
+.codex
+.gitnexus/
+.claude/
+codex_bootloader_skills/
+AGENTS.md
+CLAUDE.md
+RSA_Key/
+Cert/
+*.pem
+Session.md
+new_bootloader.h
+Application_Old
