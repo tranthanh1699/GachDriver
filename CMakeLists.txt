@@ -44,12 +44,26 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user sources here
+    # dev_common foundation
+    drivers/dev_common/src/dev_common.c
+    drivers/dev_common/src/dev_assert.c
+
+    # dev_gpio driver
+    drivers/dev_gpio/src/dev_gpio.c
+
+    # STM32H743 GPIO port
+    drivers/dev_gpio/port/stm32/dev_gpio_port_stm32.c
+
+    # Board configuration
+    boards/board_stm32h743/dev_gpio_board_cfg.c
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user defined include paths
+    drivers/dev_common/include
+    drivers/dev_gpio/include
+    drivers/dev_gpio/port/stm32
+    boards/board_stm32h743
 )
 
 # Add project symbols (macros)
