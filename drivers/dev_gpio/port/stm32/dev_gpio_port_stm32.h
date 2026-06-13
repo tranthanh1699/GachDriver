@@ -8,11 +8,11 @@ extern "C" {
 #include "dev_gpio_port.h"
 
 /*
- * Forward-declare GPIO_TypeDef to avoid pulling in the full HAL
- * in the header. The .c file includes the full HAL header.
+ * Include STM32 HAL for GPIO_TypeDef.
+ * This is allowed here because this header is INSIDE the port layer
+ * (not a public header) — only port .c files and this header include it.
  */
-struct GPIO_TypeDef;
-typedef struct GPIO_TypeDef GPIO_TypeDef;
+#include "stm32h7xx_hal.h"
 
 /* STM32-specific port pin mapping type (internal to port layer) */
 typedef struct {
