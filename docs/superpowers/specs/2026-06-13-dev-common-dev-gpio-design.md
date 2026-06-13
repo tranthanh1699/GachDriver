@@ -78,7 +78,9 @@ The `dev_gpio_channel_config_t` struct is passed through a `const` config pointe
   - `g_dev_gpio_callback_args[config_index]` — `void*` user arg per channel
 - `dev_gpio_register_callback()` writes into these common-driver-owned tables.
 - The common driver exposes **`dev_gpio_dispatch_isr(dev_gpio_channel_t channel)`** for the
-  port layer to call when a hardware interrupt fires.
+  port layer to call when a hardware interrupt fires. This function is declared in
+  **`dev_gpio_port.h`** (not in the public `dev_gpio.h`) — it is a common-driver service
+  for port implementations, not an application API.
 - `dev_gpio_dispatch_isr()` maps channel ID → config index, checks interrupt enable state,
   and invokes the registered callback with the stored user arg.
 - Port implementations call `dev_gpio_dispatch_isr()` from their vendor ISR handlers.
@@ -89,13 +91,15 @@ The `dev_gpio_channel_config_t` struct is passed through a `const` config pointe
 Logical channel IDs are `uint16_t` values defined by the board configuration. They may be
 sparse (e.g., 0, 3, 7, 100). The common driver maps channel ID to config index:
 
-- During `dev_gpio_init()`, the driver scans `config->channels[]` to build a lookup.
+- During `dev_gpio_init()`, the driver scans `config->channels[]` linearly.
 - All internal arrays (callback tables, and the mock port's state arrays) are indexed by
   **config index** (0..channel_count-1), NOT by raw channel ID.
 - A helper `dev_gpio_find_channel(channel)` returns the config index or `channel_count` if
   not found.
-- Channel IDs must be `< DEV_GPIO_CFG_MAX_CHANNELS` to keep the lookup bounded (validated
-  at init).
+- Loop bounds are always `channel_count`, never a raw channel ID value.
+- Channel IDs are validated only for uniqueness (if `DEV_GPIO_CFG_VALIDATE_DUPLICATES`
+  is enabled). There is no upper-bound check on the raw channel ID value beyond `UINT16_MAX`.
+  Sparse IDs up to 65535 are supported.
 
 ## 3. Module: dev_common
 
@@ -185,6 +189,7 @@ typedef struct {
 ```c
 typedef void (*dev_assert_user_hook_t)(const dev_assert_info_t *info);
 typedef void (*dev_assert_output_hook_t)(const char *text);
+typedef void (*dev_assert_reset_hook_t)(void);
 ```
 
 #### 3.4.5 Config Struct
@@ -193,7 +198,8 @@ typedef void (*dev_assert_output_hook_t)(const char *text);
 typedef struct {
     dev_assert_backend_t     backend;
     dev_assert_output_hook_t output_hook;   /* used by UART backend */
-    dev_assert_user_hook_t   user_hook;     /* used by USER_HOOK backend */
+    dev_assert_user_hook_t   user_hook;     /* used by USER_HOOK and RESET backends */
+    dev_assert_reset_hook_t  reset_hook;    /* used by RESET backend (platform-specific) */
     char                    *text_buffer;   /* used by TEXT_BUFFER backend */
     uint16_t                 text_buffer_size;
 } dev_assert_config_t;
@@ -215,7 +221,7 @@ void dev_assert_report(const char *file, uint32_t line,
 | `UART` | Formats message, calls `output_hook()` with the formatted string |
 | `TEXT_BUFFER` | Formats message into `text_buffer` (bounded by `text_buffer_size`) |
 | `BREAKPOINT` | Formats message, then triggers compiler breakpoint (`__builtin_trap()` or equivalent) |
-| `RESET` | Formats message, calls `user_hook()`, then triggers reset via `NVIC_SystemReset()` or equivalent |
+| `RESET` | Formats message, calls `reset_hook()` (a user-provided platform-specific reset function), then loops forever if the hook returns |
 | `USER_HOOK` | Formats message, calls `user_hook()` with the assert info struct |
 
 #### 3.4.8 Macros
@@ -365,17 +371,16 @@ dev_err_t dev_gpio_init(const dev_gpio_config_t *config);
 | 3 | If `config->channels` is NULL | DEV_ERR_NULL_PTR |
 | 4 | If `config->channel_count == 0` | DEV_ERR_INVALID_ARG |
 | 5 | If `config->channel_count > DEV_GPIO_CFG_MAX_CHANNELS` | DEV_ERR_INVALID_ARG |
-| 6 | For each channel: validate channel ID `< DEV_GPIO_CFG_MAX_CHANNELS` | DEV_ERR_INVALID_ARG |
-| 7 | For each channel: validate `direction` is a known enum value | DEV_ERR_INVALID_ARG |
-| 8 | For each channel: validate `pull` is a known enum value | DEV_ERR_INVALID_ARG |
-| 9 | For each channel: validate `interrupt` is a known enum value | DEV_ERR_INVALID_ARG |
-| 10 | If `DEV_GPIO_CFG_VALIDATE_DUPLICATES`: detect duplicate channel IDs | DEV_ERR_CONFIG |
-| 11 | Call `dev_gpio_port_init(config)` | DEV_ERR_HW_FAILURE |
-| 12 | For each channel: call `dev_gpio_port_config_channel(&channels[i])` | DEV_ERR_HW_FAILURE |
-| 13 | On port config failure: call `dev_gpio_port_deinit()` for cleanup, remain UNINITIALIZED | — |
-| 14 | Initialize internal callback tables from config | — |
-| 15 | Set state to INITIALIZED | — |
-| 16 | Return DEV_OK | — |
+| 6 | For each channel: validate `direction` is a known enum value | DEV_ERR_INVALID_ARG |
+| 7 | For each channel: validate `pull` is a known enum value | DEV_ERR_INVALID_ARG |
+| 8 | For each channel: validate `interrupt` is a known enum value | DEV_ERR_INVALID_ARG |
+| 9 | If `DEV_GPIO_CFG_VALIDATE_DUPLICATES`: detect duplicate channel IDs | DEV_ERR_CONFIG |
+| 10 | Call `dev_gpio_port_init(config)` | DEV_ERR_HW_FAILURE |
+| 11 | For each channel: call `dev_gpio_port_config_channel(&channels[i])` | DEV_ERR_HW_FAILURE |
+| 12 | On port config failure: call `dev_gpio_port_deinit()` for cleanup, remain UNINITIALIZED | — |
+| 13 | Initialize internal callback tables from config | — |
+| 14 | Set state to INITIALIZED | — |
+| 15 | Return DEV_OK | — |
 
 #### 4.4.2 dev_gpio_deinit
 
@@ -403,9 +408,13 @@ dev_err_t dev_gpio_read(dev_gpio_channel_t channel, dev_gpio_level_t *level);
 | 1 | If not initialized | DEV_ERR_NOT_INITIALIZED |
 | 2 | If `level` is NULL | DEV_ERR_NULL_PTR |
 | 3 | Find channel → config index; if not found | DEV_ERR_INVALID_ARG |
-| 4 | Call `dev_gpio_port_read(channel, level)` | DEV_ERR_HW_FAILURE |
-| 5 | Write `*level` only if port read succeeds | — |
+| 4 | Call `dev_gpio_port_read(channel, &temp)` into a local `dev_gpio_level_t temp` | DEV_ERR_HW_FAILURE |
+| 5 | If port succeeds, assign `*level = temp`. On failure, `*level` is NOT modified | — |
 | 6 | Return DEV_OK | — |
+
+The common driver reads into a local variable to guarantee `*level` is never
+partially written by a failing port. After the port call succeeds, `*level = temp`
+is a single deterministic assignment.
 
 #### 4.4.4 dev_gpio_write
 
@@ -510,9 +519,15 @@ dev_err_t dev_gpio_enable_interrupt(dev_gpio_channel_t channel);
 |------|--------|------------------|
 | 1 | If not initialized | DEV_ERR_NOT_INITIALIZED |
 | 2 | Find channel → config index; if not found | DEV_ERR_INVALID_ARG |
-| 3 | Call `dev_gpio_port_enable_interrupt(channel)` | DEV_ERR_HW_FAILURE |
-| 4 | Mark interrupt as enabled in internal state | — |
-| 5 | Return DEV_OK | — |
+| 3 | Mark interrupt as enabled in common state FIRST | — |
+| 4 | Call `dev_gpio_port_enable_interrupt(channel)` | DEV_ERR_HW_FAILURE |
+| 5 | If port call fails: roll back common state to disabled, return error | — |
+| 6 | Return DEV_OK | — |
+
+Ordering rationale: common state is marked enabled BEFORE the port enables hardware.
+This ensures that if the hardware fires an interrupt immediately, `dev_gpio_dispatch_isr()`
+already sees the channel as enabled and will invoke the callback (no dropped interrupt).
+If the port call fails, common state is rolled back to disabled.
 
 #### 4.4.11 dev_gpio_disable_interrupt
 
@@ -524,9 +539,14 @@ dev_err_t dev_gpio_disable_interrupt(dev_gpio_channel_t channel);
 |------|--------|------------------|
 | 1 | If not initialized | DEV_ERR_NOT_INITIALIZED |
 | 2 | Find channel → config index; if not found | DEV_ERR_INVALID_ARG |
-| 3 | Call `dev_gpio_port_disable_interrupt(channel)` | DEV_ERR_HW_FAILURE |
-| 4 | Mark interrupt as disabled in internal state | — |
-| 5 | Return DEV_OK | — |
+| 3 | Mark interrupt as disabled in common state FIRST | — |
+| 4 | Call `dev_gpio_port_disable_interrupt(channel)` | DEV_ERR_HW_FAILURE |
+| 5 | If port call fails: common state remains disabled (no rollback needed) | — |
+| 6 | Return DEV_OK | — |
+
+Ordering rationale: common state is marked disabled BEFORE the port disables hardware.
+This ensures that even if a pending interrupt fires during the port call,
+`dev_gpio_dispatch_isr()` sees it as disabled and drops it cleanly.
 
 Safe to call even if already disabled (idempotent).
 
@@ -566,6 +586,8 @@ Each public API function must have a Doxygen-style comment covering:
 
 ### 4.6 Port Interface (dev_gpio_port.h)
 
+Port-implemented functions (called by common driver):
+
 ```c
 dev_err_t dev_gpio_port_init(const dev_gpio_config_t *config);
 dev_err_t dev_gpio_port_deinit(void);
@@ -580,12 +602,23 @@ dev_err_t dev_gpio_port_enable_interrupt(dev_gpio_channel_t channel);
 dev_err_t dev_gpio_port_disable_interrupt(dev_gpio_channel_t channel);
 ```
 
+Common-driver service (declared in `dev_gpio_port.h`, called by port ISR handlers):
+
+```c
+void dev_gpio_dispatch_isr(dev_gpio_channel_t channel);
+```
+
 Port rules:
 - Port does NOT own callbacks. It calls `dev_gpio_dispatch_isr()` from its ISR handlers.
 - Port does NOT track interrupt enable state. The common driver does.
 - Port maps vendor errors to `dev_err_t`.
 - Unsupported features return `DEV_ERR_NOT_SUPPORTED`.
 - Port is allowed to include vendor HAL headers.
+
+Port error mapping rule:
+- Common driver propagates `DEV_ERR_NOT_SUPPORTED` from the port as-is.
+- All other non-OK port errors are mapped to `DEV_ERR_HW_FAILURE` by the common driver.
+This ensures the application sees a consistent error taxonomy regardless of vendor.
 
 ### 4.7 Mock Port
 
@@ -650,7 +683,6 @@ The following validations are required across the module:
 | Channels pointer | != NULL | DEV_ERR_NULL_PTR |
 | channel_count | > 0 | DEV_ERR_INVALID_ARG |
 | channel_count | ≤ DEV_GPIO_CFG_MAX_CHANNELS | DEV_ERR_INVALID_ARG |
-| Each channel ID | < DEV_GPIO_CFG_MAX_CHANNELS | DEV_ERR_INVALID_ARG |
 | Duplicate channel IDs | (if VALIDATE_DUPLICATES enabled) | DEV_ERR_CONFIG |
 | level parameter | LOW or HIGH | DEV_ERR_INVALID_ARG |
 | direction parameter | known enum value | DEV_ERR_INVALID_ARG |
@@ -740,7 +772,7 @@ Integrates into existing `CMakeLists.txt`:
 
 ## 7. Test Plan
 
-All tests run against the mock port on host. 26 test cases:
+All tests run against the mock port on host. 35 test cases:
 
 | # | Test | Expected |
 |---|------|----------|
@@ -749,34 +781,36 @@ All tests run against the mock port on host. 26 test cases:
 | 3 | init with NULL channels | DEV_ERR_NULL_PTR |
 | 4 | init with channel_count=0 | DEV_ERR_INVALID_ARG |
 | 5 | init with channel_count > MAX_CHANNELS | DEV_ERR_INVALID_ARG |
-| 6 | init with invalid channel ID (≥ MAX_CHANNELS) | DEV_ERR_INVALID_ARG |
-| 7 | init with invalid direction enum | DEV_ERR_INVALID_ARG |
-| 8 | init with invalid pull enum | DEV_ERR_INVALID_ARG |
-| 9 | init with invalid interrupt enum | DEV_ERR_INVALID_ARG |
-| 10 | double init | DEV_ERR_ALREADY_INITIALIZED |
-| 11 | duplicate channel detection | DEV_ERR_CONFIG |
-| 12 | port init failure propagates | DEV_ERR_HW_FAILURE |
-| 13 | port channel config failure + cleanup | DEV_ERR_HW_FAILURE, state stays UNINITIALIZED |
-| 14 | read before init | DEV_ERR_NOT_INITIALIZED |
-| 15 | write before init | DEV_ERR_NOT_INITIALIZED |
-| 16 | read with NULL level pointer | DEV_ERR_NULL_PTR |
-| 17 | read from unknown channel | DEV_ERR_INVALID_ARG |
-| 18 | write with invalid level | DEV_ERR_INVALID_ARG |
-| 19 | write to input-only channel | DEV_ERR_INVALID_STATE |
-| 20 | toggle input-only channel | DEV_ERR_INVALID_STATE |
-| 21 | read from output channel | DEV_OK, returns default_level |
-| 22 | write then read output | DEV_OK, level matches |
-| 23 | toggle output | DEV_OK, level flips |
-| 24 | set pull mode | DEV_OK |
-| 25 | register callback | DEV_OK |
-| 26 | enable interrupt, mock trigger ISR | callback invoked with correct channel+arg |
-| 27 | disable interrupt | DEV_OK, callback not invoked on trigger |
-| 28 | deinit | DEV_OK, is_initialized() == false |
-| 29 | reinit after deinit | DEV_OK |
-| 30 | unsupported intr type | DEV_ERR_NOT_SUPPORTED |
-| 31 | unsupported pull mode | DEV_ERR_NOT_SUPPORTED |
-| 32 | mock error injection: port write fails | DEV_ERR_HW_FAILURE propagated |
-| 33 | mock error injection: port read fails | DEV_ERR_HW_FAILURE, *level unchanged |
+| 6 | init with sparse channel IDs (e.g., 100, 200) | DEV_OK, channels found by scan not array index |
+| 7 | init with unknown channel at runtime | DEV_ERR_INVALID_ARG |
+| 8 | init with invalid direction enum | DEV_ERR_INVALID_ARG |
+| 9 | init with invalid pull enum | DEV_ERR_INVALID_ARG |
+| 10 | init with invalid interrupt enum | DEV_ERR_INVALID_ARG |
+| 11 | double init | DEV_ERR_ALREADY_INITIALIZED |
+| 12 | duplicate channel detection | DEV_ERR_CONFIG |
+| 13 | port init failure propagates | DEV_ERR_HW_FAILURE |
+| 14 | port channel config failure + cleanup | DEV_ERR_HW_FAILURE, state stays UNINITIALIZED |
+| 15 | read before init | DEV_ERR_NOT_INITIALIZED |
+| 16 | write before init | DEV_ERR_NOT_INITIALIZED |
+| 17 | read with NULL level pointer | DEV_ERR_NULL_PTR |
+| 18 | read from unknown channel | DEV_ERR_INVALID_ARG |
+| 19 | write with invalid level | DEV_ERR_INVALID_ARG |
+| 20 | write to input-only channel | DEV_ERR_INVALID_STATE |
+| 21 | toggle input-only channel | DEV_ERR_INVALID_STATE |
+| 22 | read from output channel | DEV_OK, returns default_level |
+| 23 | write then read output | DEV_OK, level matches |
+| 24 | toggle output | DEV_OK, level flips |
+| 25 | set pull mode | DEV_OK |
+| 26 | register callback | DEV_OK |
+| 27 | enable interrupt, mock trigger ISR | callback invoked with correct channel+arg |
+| 28 | disable interrupt | DEV_OK, callback not invoked on trigger |
+| 29 | deinit | DEV_OK, is_initialized() == false |
+| 30 | reinit after deinit | DEV_OK |
+| 31 | unsupported intr type | DEV_ERR_NOT_SUPPORTED |
+| 32 | unsupported pull mode | DEV_ERR_NOT_SUPPORTED |
+| 33 | mock error injection: port write fails | DEV_ERR_HW_FAILURE propagated |
+| 34 | mock error injection: port read fails | DEV_ERR_HW_FAILURE, *level unchanged |
+| 35 | enable interrupt: port fails, common rolls back | DEV_ERR_HW_FAILURE, interrupt stays disabled |
 
 ## 8. MISRA-C Compliance
 
@@ -796,7 +830,7 @@ All tests run against the mock port on host. 26 test cases:
 - [ ] 18 source files created
 - [ ] All public APIs documented with Doxygen comments (purpose, params, returns, init req, ISR safety, reentrancy, error behavior)
 - [ ] Mock port compiles and runs on host
-- [ ] All 33 test cases pass
+- [ ] All 35 test cases pass
 - [ ] No vendor headers in public APIs or common logic
 - [ ] No magic numbers
 - [ ] `DEV_OK` equals 0
