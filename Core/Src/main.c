@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "gpio.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "dev_gpio.h"
@@ -92,7 +93,7 @@ int main(void)
   MX_GPIO_Init();
   /* USER CODE BEGIN 2 */
 
-  /* ── dev_gpio example: PB0 (output) and PB1 (input) ── */
+  /* ── dev_gpio example: blink PB0 and PB1 alternately ── */
   {
       dev_err_t err;
 
@@ -104,10 +105,11 @@ int main(void)
       }
 
       /*
-       * Set PB0 HIGH to indicate driver is initialized.
-       * PB0 is configured as OUTPUT with default LOW in board config.
+       * Start with PB0 HIGH, PB1 LOW.
+       * Both are configured as OUTPUT with default LOW in board config.
        */
       (void)dev_gpio_write(DEV_GPIO_CHANNEL_PB0, DEV_GPIO_LEVEL_HIGH);
+      (void)dev_gpio_write(DEV_GPIO_CHANNEL_PB1, DEV_GPIO_LEVEL_LOW);
   }
 
   /* USER CODE END 2 */
@@ -120,29 +122,13 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     {
-        dev_gpio_level_t pb1_level;
-        dev_err_t        err;
-
         /*
-         * Read PB1 input state.
-         * PB1 is configured as INPUT with pull-up in board config.
-         *
-         * If PB1 is LOW (button pressed / external pull to GND),
-         * toggle PB0 to create a visible LED blink pattern.
-         * If PB1 is HIGH (pull-up active), turn PB0 OFF.
+         * Blink PB0 and PB1 alternately:
+         *   LED on PB0 toggles, LED on PB1 toggles opposite.
+         *   Result: alternating blink pattern (PB0 HIGH → PB1 LOW → PB0 LOW → PB1 HIGH → ...)
          */
-        err = dev_gpio_read(DEV_GPIO_CHANNEL_PB1, &pb1_level);
-        if (err == DEV_OK)
-        {
-            if (pb1_level == DEV_GPIO_LEVEL_LOW)
-            {
-                (void)dev_gpio_toggle(DEV_GPIO_CHANNEL_PB0);
-            }
-            else
-            {
-                (void)dev_gpio_write(DEV_GPIO_CHANNEL_PB0, DEV_GPIO_LEVEL_LOW);
-            }
-        }
+        (void)dev_gpio_toggle(DEV_GPIO_CHANNEL_PB0);
+        (void)dev_gpio_toggle(DEV_GPIO_CHANNEL_PB1);
 
         /* Simple busy-wait delay (~500 ms at default HCLK) */
         for (volatile uint32_t d = 0U; d < 5000000U; d++)

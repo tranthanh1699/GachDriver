@@ -17,7 +17,7 @@ extern "C" {
 
 /*
  * PB1 — GPIO Port B, Pin 1
- * Example: button input or general-purpose digital input
+ * Example: LED output or general-purpose digital output
  */
 #define DEV_GPIO_CHANNEL_PB1              ((dev_gpio_channel_t)1U)
 

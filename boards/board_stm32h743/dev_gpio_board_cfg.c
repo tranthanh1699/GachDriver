@@ -20,10 +20,10 @@ static dev_gpio_channel_config_t m_channels[] = {
     },
     {
         .channel       = DEV_GPIO_CHANNEL_PB1,
-        .direction     = DEV_GPIO_DIRECTION_INPUT,
-        .pull          = DEV_GPIO_PULL_UP,
+        .direction     = DEV_GPIO_DIRECTION_OUTPUT,
+        .pull          = DEV_GPIO_PULL_NONE,
         .default_level = DEV_GPIO_LEVEL_LOW,
-        .interrupt     = DEV_GPIO_INTR_RISING_EDGE,
+        .interrupt     = DEV_GPIO_INTR_DISABLE,
         .callback      = NULL,
         .callback_arg  = NULL,
     },

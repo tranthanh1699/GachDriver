@@ -7,7 +7,14 @@ extern "C" {
 
 #include "dev_gpio_port.h"
 
-/* STM32-specific port pin mapping type */
+/*
+ * Forward-declare GPIO_TypeDef to avoid pulling in the full HAL
+ * in the header. The .c file includes the full HAL header.
+ */
+struct GPIO_TypeDef;
+typedef struct GPIO_TypeDef GPIO_TypeDef;
+
+/* STM32-specific port pin mapping type (internal to port layer) */
 typedef struct {
     dev_gpio_channel_t channel;
     GPIO_TypeDef      *port;

@@ -7,6 +7,8 @@
  */
 
 #include "dev_gpio_port_stm32.h"
+#include "dev_gpio_board_cfg.h"
+#include "dev_compiler.h"
 #include "stm32h7xx_hal.h"
 
 /* ── Pin mapping table (board-specific) ── */
@@ -287,7 +289,8 @@ dev_err_t dev_gpio_port_config_interrupt(dev_gpio_channel_t channel,
 
     switch (interrupt) {
     case DEV_GPIO_INTR_DISABLE:
-        hal_mode = GPIO_MODE_IT_DISABLE;
+        /* Reconfigure as regular input (IT mode disabled) */
+        hal_mode = GPIO_MODE_INPUT;
         break;
     case DEV_GPIO_INTR_RISING_EDGE:
         hal_mode = GPIO_MODE_IT_RISING;
