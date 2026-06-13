@@ -248,11 +248,12 @@ returns after reporting. The caller (macro) decides whether to return an error o
 #define DEV_CHECK_RET(condition, error_code)     \
     do {                                         \
         if (!(condition)) {                      \
+            dev_err_t _dev_check_err = (error_code); \
             dev_assert_report(__FILE__,          \
                               (uint32_t)__LINE__, \
                               DEV_ASSERT_TYPE_CHECK, \
-                              (error_code));      \
-            return (error_code);                  \
+                              _dev_check_err);    \
+            return _dev_check_err;                \
         }                                         \
     } while (false)
 
@@ -678,9 +679,33 @@ static bool                  m_initialized;
 The mock port exposes test helpers for negative testing:
 
 ```c
-/* Error injection: make a specific port operation return an error */
-void dev_gpio_port_mock_set_error(dev_err_t error);  /* all subsequent calls fail */
-void dev_gpio_port_mock_clear_error(void);           /* clear injected error */
+/* Operations that can be targeted for error injection */
+typedef enum {
+    DEV_GPIO_PORT_MOCK_OP_INIT = 0,
+    DEV_GPIO_PORT_MOCK_OP_DEINIT,
+    DEV_GPIO_PORT_MOCK_OP_CONFIG_CHANNEL,
+    DEV_GPIO_PORT_MOCK_OP_READ,
+    DEV_GPIO_PORT_MOCK_OP_WRITE,
+    DEV_GPIO_PORT_MOCK_OP_TOGGLE,
+    DEV_GPIO_PORT_MOCK_OP_SET_DIRECTION,
+    DEV_GPIO_PORT_MOCK_OP_SET_PULL,
+    DEV_GPIO_PORT_MOCK_OP_CONFIG_INTERRUPT,
+    DEV_GPIO_PORT_MOCK_OP_ENABLE_INTERRUPT,
+    DEV_GPIO_PORT_MOCK_OP_DISABLE_INTERRUPT,
+    DEV_GPIO_PORT_MOCK_OP_COUNT
+} dev_gpio_port_mock_op_t;
+
+/* Global error injection: all subsequent calls fail with this error */
+void dev_gpio_port_mock_set_error(dev_err_t error);
+
+/* Per-operation injection: only the specified operation fails */
+void dev_gpio_port_mock_set_error_for_op(dev_gpio_port_mock_op_t op, dev_err_t error);
+
+/* Fail-after-N: the Nth call to any port operation fails. Counter resets on clear. */
+void dev_gpio_port_mock_set_fail_after(uint16_t call_count, dev_err_t error);
+
+/* Clear all injected errors, reset call counter */
+void dev_gpio_port_mock_clear_error(void);
 
 /* ISR simulation: invoke the common ISR dispatch as if hardware triggered */
 void dev_gpio_port_mock_trigger_isr(dev_gpio_channel_t channel);
@@ -693,11 +718,27 @@ bool                 dev_gpio_port_mock_is_interrupt_enabled(dev_gpio_channel_t 
 ```
 
 Error injection behavior:
-- When an error is injected, all subsequent port operations return that error.
-- `dev_gpio_port_mock_clear_error()` restores normal operation.
-- Port operations check the injected error BEFORE any validation, so even valid
+- `dev_gpio_port_mock_set_error(error)` — all subsequent port operations return `error`.
+- `dev_gpio_port_mock_set_error_for_op(op, error)` — only the specified operation returns
+  `error`; all others behave normally.
+- `dev_gpio_port_mock_set_fail_after(N, error)` — the Nth call to any port operation
+  returns `error`; calls 1..N-1 succeed, call N+1 onward succeed. The internal call
+  counter increments on every port operation regardless of which operation it is.
+- Per-operation injection and fail-after-N can be combined with global injection.
+  Per-operation takes precedence over global. Fail-after-N takes precedence over both
+  when its counter matches.
+- `dev_gpio_port_mock_clear_error()` clears ALL injected errors and resets the call counter.
+- Port operations check injected errors BEFORE any validation, so even valid
   calls fail with the injected error — this tests the common driver's error
   propagation path.
+
+Example: to test port channel config failure during init without having port init fail:
+```c
+dev_gpio_port_mock_set_error_for_op(DEV_GPIO_PORT_MOCK_OP_CONFIG_CHANNEL, DEV_ERR_HW_FAILURE);
+dev_err_t err = dev_gpio_init(&g_dev_gpio_config);
+// err == DEV_ERR_HW_FAILURE, state remains UNINITIALIZED
+dev_gpio_port_mock_clear_error();
+```
 
 ### 4.8 Configuration (dev_gpio_cfg.h)
 
@@ -707,6 +748,18 @@ Error injection behavior:
 #define DEV_GPIO_CFG_VALIDATE_DUPLICATES   (1U)
 #define DEV_GPIO_CFG_ENABLE_RUNTIME_CHECKS (1U)
 ```
+
+Feature switch behavior:
+- `DEV_GPIO_CFG_INTERRUPT_ENABLED`:
+  - `1U`: interrupt APIs (`config_interrupt`, `register_callback`, `enable_interrupt`,
+    `disable_interrupt`, `dispatch_isr`) are fully functional.
+  - `0U`: interrupt APIs still compile and link (stable API surface), but return
+    `DEV_ERR_NOT_SUPPORTED`. The common driver skips internal interrupt state tracking.
+    This allows a port that doesn't support interrupts to compile without dead code
+    while keeping the API consistent across all targets.
+- `DEV_GPIO_CFG_VALIDATE_DUPLICATES`:
+  - `1U`: init scans for duplicate channel IDs, returns `DEV_ERR_CONFIG` if found.
+  - `0U`: duplicate check is skipped (saves init time on resource-constrained targets).
 
 ### 4.9 Validation Summary
 
@@ -808,7 +861,7 @@ Integrates into existing `CMakeLists.txt`:
 
 ## 7. Test Plan
 
-All tests run against the mock port on host. 35 test cases:
+All tests run against the mock port on host. 36 test cases:
 
 | # | Test | Expected |
 |---|------|----------|
@@ -847,6 +900,7 @@ All tests run against the mock port on host. 35 test cases:
 | 33 | mock error injection: port write fails | DEV_ERR_HW_FAILURE propagated |
 | 34 | mock error injection: port read fails | DEV_ERR_HW_FAILURE, *level unchanged |
 | 35 | enable interrupt: port fails, common rolls back | DEV_ERR_HW_FAILURE, interrupt stays disabled |
+| 36 | deinit: port deinit fails, state forced UNINITIALIZED | DEV_ERR_HW_FAILURE, callbacks cleared, reinit allowed |
 
 ## 8. MISRA-C Compliance
 
@@ -861,12 +915,30 @@ All tests run against the mock port on host. 35 test cases:
 - No `goto`, no `continue`
 - Vendor code isolated in port layer
 
+### 8.1 Documented MISRA Deviations
+
+**DEV-MISRA-001: Infinite loop in fatal assert termination.**
+
+The `dev_assert_report()` function with `DEV_ASSERT_TYPE_ASSERT` uses an infinite loop
+(`for (;;) {}`) as the termination mechanism for backends that do not trap or reset
+(NONE, UART, TEXT_BUFFER, USER_HOOK). The `DEV_ASSERT()` macro also contains a `for (;;) {}`
+fallback after the report call.
+
+- **Rule violated**: MISRA C:2012 Rule 14.2 (loop counter shall not be modified) — not
+  strictly violated since there is no counter, but the loop is unbounded.
+- **Justification**: This is intentional fatal behavior. When an assertion fires in a
+  safety-critical embedded system, there is no safe recovery path — the system must stop.
+  The loop provides a deterministic halt point for debugger attachment.
+- **Mitigation**: The loop is the last resort fallback. The BREAKPOINT backend uses
+  `__builtin_trap()` which terminates without looping. The RESET backend calls a
+  platform reset hook. Only backends that lack a termination primitive use the loop.
+
 ## 9. Definition of Done
 
 - [ ] 18 source files created
 - [ ] All public APIs documented with Doxygen comments (purpose, params, returns, init req, ISR safety, reentrancy, error behavior)
 - [ ] Mock port compiles and runs on host
-- [ ] All 35 test cases pass
+- [ ] All 36 test cases pass
 - [ ] No vendor headers in public APIs or common logic
 - [ ] No magic numbers
 - [ ] `DEV_OK` equals 0
