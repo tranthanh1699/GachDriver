@@ -54,8 +54,11 @@ State transitions:
   ONLY after ALL port init and per-channel configuration succeed. On any failure, the driver
   remains UNINITIALIZED and any partially configured channels are cleaned up via
   `dev_gpio_port_deinit()`.
-- Only `dev_gpio_deinit()` moves from INITIALIZED → UNINITIALIZED. Before clearing state,
-  all interrupts are disabled, all callbacks are cleared, and `dev_gpio_port_deinit()` is called.
+- Only `dev_gpio_deinit()` moves from INITIALIZED → UNINITIALIZED. All interrupts are
+  disabled, all callbacks are cleared, and common interrupt state is cleared BEFORE
+  `dev_gpio_port_deinit()` is called. The module is forced to UNINITIALIZED regardless
+  of whether port deinit succeeds or fails. A port deinit error is returned to the
+  caller but does not prevent re-initialization.
 
 ### 2.3 Key Design Decisions
 
@@ -215,14 +218,29 @@ void dev_assert_report(const char *file, uint32_t line,
 
 #### 3.4.7 Backend Behavior
 
-| Backend | Behavior |
-|---------|----------|
+`dev_assert_report()` behavior depends on `type`:
+
+**For `DEV_ASSERT_TYPE_ASSERT` (fatal):** The function MUST NOT return. Every backend
+guarantees termination:
+| Backend | Behavior for ASSERT type |
+|---------|--------------------------|
+| `NONE` | Loop forever (safe hang; no output, no hook) |
+| `UART` | Format message, call `output_hook()`, then loop forever |
+| `TEXT_BUFFER` | Format message into `text_buffer`, then loop forever |
+| `BREAKPOINT` | Format message, trigger compiler breakpoint (`__builtin_trap()`) |
+| `RESET` | Format message, call `reset_hook()`. If the hook returns, loop forever |
+| `USER_HOOK` | Format message, call `user_hook()`, then loop forever |
+
+**For `DEV_ASSERT_TYPE_CHECK` and `DEV_ASSERT_TYPE_ERROR` (non-fatal):** The function
+returns after reporting. The caller (macro) decides whether to return an error or continue.
+| Backend | Behavior for CHECK/ERROR type |
+|---------|-------------------------------|
 | `NONE` | No output, returns immediately |
-| `UART` | Formats message, calls `output_hook()` with the formatted string |
-| `TEXT_BUFFER` | Formats message into `text_buffer` (bounded by `text_buffer_size`) |
-| `BREAKPOINT` | Formats message, then triggers compiler breakpoint (`__builtin_trap()` or equivalent) |
-| `RESET` | Formats message, calls `reset_hook()` (a user-provided platform-specific reset function), then loops forever if the hook returns |
-| `USER_HOOK` | Formats message, calls `user_hook()` with the assert info struct |
+| `UART` | Format message, call `output_hook()`, return |
+| `TEXT_BUFFER` | Format message into `text_buffer`, return |
+| `BREAKPOINT` | Format message, return (NO breakpoint for non-fatal checks) |
+| `RESET` | Format message, return (NO reset for non-fatal checks) |
+| `USER_HOOK` | Format message, call `user_hook()`, return |
 
 #### 3.4.8 Macros
 
@@ -260,7 +278,10 @@ void dev_assert_report(const char *file, uint32_t line,
                               (uint32_t)__LINE__, \
                               DEV_ASSERT_TYPE_ASSERT, \
                               DEV_ERR_FAIL);      \
-            /* backend BREAKPOINT/RESET handles termination */ \
+            /* dev_assert_report() MUST NOT return for ASSERT type.  */ \
+            /* Backend guarantees termination (loop/trap/reset).       */ \
+            /* Compiler-only safeguard in case of misconfiguration:    */ \
+            for (;;) {}                          \
         }                                         \
     } while (false)
 ```
@@ -269,7 +290,9 @@ Rules:
 - All macros use `do { } while (false)`.
 - `DEV_CHECK_RET` and `DEV_CHECK_PTR_RET` evaluate `condition`/`pointer` exactly once.
 - `DEV_CHECK_OK_RET` evaluates `expression` exactly once via a local variable.
-- `DEV_ASSERT` does NOT return; the backend (BREAKPOINT/RESET) determines termination.
+- `DEV_ASSERT` is FATAL: `dev_assert_report()` with `DEV_ASSERT_TYPE_ASSERT` must not return.
+  Every backend guarantees termination (loop, trap, or reset). A `for(;;){}` fallback after
+  the call is present as a compiler safeguard.
 - No magic numbers — `__LINE__` is cast to `uint32_t` explicitly.
 - Macros do not allocate memory, call vendor APIs, or contain complex logic.
 
@@ -393,9 +416,16 @@ dev_err_t dev_gpio_deinit(void);
 | 1 | If not initialized | DEV_ERR_NOT_INITIALIZED |
 | 2 | For each channel: disable interrupt via port | (best-effort, error logged but not blocking) |
 | 3 | Clear all callback table entries to NULL | — |
-| 4 | Call `dev_gpio_port_deinit()` | DEV_ERR_HW_FAILURE |
-| 5 | Clear state to UNINITIALIZED | — |
-| 6 | Return DEV_OK | — |
+| 4 | Clear common interrupt enable state to disabled | — |
+| 5 | Call `dev_gpio_port_deinit()`, capture return | (captured, not yet returned) |
+| 6 | **Force state to UNINITIALIZED regardless of step 5 outcome** | — |
+| 7 | If step 5 port call failed, return port error | DEV_ERR_HW_FAILURE |
+| 8 | Return DEV_OK | — |
+
+Safety contract: Callbacks and common state are ALWAYS cleared (steps 2–4 run before
+the port call). State is ALWAYS forced to UNINITIALIZED (step 6). The module is never
+left in a half-deinitialized zombie state. If the port deinit fails, the error is
+returned to the caller but the module is deinitialized and can be re-initialized.
 
 #### 4.4.3 dev_gpio_read
 
@@ -558,7 +588,7 @@ bool dev_gpio_is_initialized(void);
 
 Returns `true` if the driver is in INITIALIZED state.
 
-#### 4.4.13 dev_gpio_dispatch_isr (internal, called by port layer)
+#### 4.4.13 dev_gpio_dispatch_isr (port-only — NOT application API)
 
 ```
 void dev_gpio_dispatch_isr(dev_gpio_channel_t channel);
@@ -602,15 +632,20 @@ dev_err_t dev_gpio_port_enable_interrupt(dev_gpio_channel_t channel);
 dev_err_t dev_gpio_port_disable_interrupt(dev_gpio_channel_t channel);
 ```
 
-Common-driver service (declared in `dev_gpio_port.h`, called by port ISR handlers):
+Common-driver service (declared in `dev_gpio_port.h`, called ONLY by port ISR handlers —
+NOT part of the application-facing public API):
 
 ```c
+/* PORT-ONLY: called from vendor ISR handlers. Do not call from application code. */
 void dev_gpio_dispatch_isr(dev_gpio_channel_t channel);
 ```
 
 Port rules:
 - Port does NOT own callbacks. It calls `dev_gpio_dispatch_isr()` from its ISR handlers.
-- Port does NOT track interrupt enable state. The common driver does.
+- Port does NOT gate callback dispatch. The common driver owns the interrupt-enable state
+  that controls whether `dev_gpio_dispatch_isr()` invokes a callback. Ports MAY maintain
+  their own internal hardware/simulated enable state (e.g., for mock inspection or
+  hardware register tracking), but MUST NOT use it to decide whether to invoke callbacks.
 - Port maps vendor errors to `dev_err_t`.
 - Unsupported features return `DEV_ERR_NOT_SUPPORTED`.
 - Port is allowed to include vendor HAL headers.
@@ -748,6 +783,7 @@ Standalone CMakeLists.txt compiling `dev_common`, `dev_gpio`, `mock port`,
 
 ```cmake
 add_executable(gpio_test_host
+    drivers/dev_common/src/dev_common.c
     drivers/dev_common/src/dev_assert.c
     drivers/dev_gpio/src/dev_gpio.c
     drivers/dev_gpio/port/mock/dev_gpio_port_mock.c
