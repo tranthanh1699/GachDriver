@@ -18,7 +18,9 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "gpio.h"
+#include "dev_gpio.h"
+#include "dev_gpio_board_cfg.h"
+#include "dev_common.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -92,6 +94,24 @@ int main(void)
   MX_GPIO_Init();
   /* USER CODE BEGIN 2 */
 
+  /* ── dev_gpio example: PB0 (output) and PB1 (input) ── */
+  {
+      dev_err_t err;
+
+      err = dev_gpio_init(&g_dev_gpio_config);
+      if (err != DEV_OK)
+      {
+          /* Initialization failed — halt for debug inspection */
+          Error_Handler();
+      }
+
+      /*
+       * Set PB0 HIGH to indicate driver is initialized.
+       * PB0 is configured as OUTPUT with default LOW in board config.
+       */
+      (void)dev_gpio_write(DEV_GPIO_CHANNEL_PB0, DEV_GPIO_LEVEL_HIGH);
+  }
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -101,6 +121,37 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    {
+        dev_gpio_level_t pb1_level;
+        dev_err_t        err;
+
+        /*
+         * Read PB1 input state.
+         * PB1 is configured as INPUT with pull-up in board config.
+         *
+         * If PB1 is LOW (button pressed / external pull to GND),
+         * toggle PB0 to create a visible LED blink pattern.
+         * If PB1 is HIGH (pull-up active), turn PB0 OFF.
+         */
+        err = dev_gpio_read(DEV_GPIO_CHANNEL_PB1, &pb1_level);
+        if (err == DEV_OK)
+        {
+            if (pb1_level == DEV_GPIO_LEVEL_LOW)
+            {
+                (void)dev_gpio_toggle(DEV_GPIO_CHANNEL_PB0);
+            }
+            else
+            {
+                (void)dev_gpio_write(DEV_GPIO_CHANNEL_PB0, DEV_GPIO_LEVEL_LOW);
+            }
+        }
+
+        /* Simple busy-wait delay (~500 ms at default HCLK) */
+        for (volatile uint32_t d = 0U; d < 5000000U; d++)
+        {
+            /* nop */
+        }
+    }
   }
   /* USER CODE END 3 */
 }
