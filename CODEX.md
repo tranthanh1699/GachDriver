@@ -670,6 +670,93 @@ When adding a new hardware target:
 
 ---
 
+
+
+---
+
+## Project Documentation Rules
+
+Every `dev_*` component shall have its own documentation folder under the project-level `docs/` directory.
+
+Required documentation structure:
+
+```text
+docs/
+  dev_common/
+    README.md
+  dev_gpio/
+    README.md
+  dev_uart/
+    README.md
+  dev_spi/
+    README.md
+  dev_i2c/
+    README.md
+  dev_timer/
+    README.md
+```
+
+Rules:
+
+1. Each component shall keep its detailed documentation inside `docs/dev_<component>/README.md`.
+2. Do not scatter component documentation across random files or folders.
+3. Do not place long component documentation inside source files.
+4. Source files may contain API comments, but architecture, usage, porting, safety notes, and bring-up guides shall live in `docs/dev_<component>/README.md`.
+5. The project root shall contain only one main documentation entry point: `README.md`.
+6. The root `README.md` shall describe:
+   - project mission
+   - project architecture
+   - folder structure
+   - supported components
+   - supported hardware targets
+   - how to add a new component
+   - how to port to new hardware
+   - links to each `docs/dev_<component>/README.md`
+7. The root `README.md` shall act as the documentation index.
+8. When a new component is added, the AI shall also:
+   - create `docs/dev_<component>/README.md`
+   - update the root `README.md` with a link to the new component documentation
+   - update the project folder structure section if needed
+9. Component documentation shall be written so another engineer can use, port, test, and review the component without reading the implementation first.
+10. Documentation must stay synchronized with public APIs and configuration files.
+
+Example root `README.md` component link section:
+
+```markdown
+## Components
+
+| Component | Description | Documentation |
+|----------|-------------|---------------|
+| `dev_common` | Common types, errors, assert, compiler abstraction | [docs/dev_common/README.md](docs/dev_common/README.md) |
+| `dev_gpio` | Hardware-independent digital IO driver | [docs/dev_gpio/README.md](docs/dev_gpio/README.md) |
+```
+
+Example component documentation template:
+
+```markdown
+# dev_gpio
+
+## Purpose
+
+## Public APIs
+
+## Configuration
+
+## Port Layer
+
+## Interrupt Behavior
+
+## Safety Notes
+
+## MISRA-C Notes
+
+## Usage Example
+
+## Bring-Up Checklist
+
+## Review Checklist
+```
+
 ## 24. Codex Code Generation Rules
 
 When generating or modifying code:
