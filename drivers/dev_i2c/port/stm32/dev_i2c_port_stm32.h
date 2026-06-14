@@ -6,24 +6,37 @@ extern "C" {
 #endif
 
 #include "dev_i2c_port.h"
+
+/*
+ * STM32 Cube-managed I2C port.
+ *
+ * Assumes CubeMX/CubeIDE has already configured:
+ *   - SDA/SCL GPIO alternate function
+ *   - I2C peripheral clock
+ *   - I2C timing, filters
+ *   - NVIC priority
+ *   - HAL I2C init (hi2c1, hi2c2, etc.)
+ *
+ * This port only wraps Cube HAL handles. No GPIO/clock/NVIC/timing
+ * configuration is performed.
+ *
+ * To enable:
+ *   1. Uncomment #define HAL_I2C_MODULE_ENABLED in stm32h7xx_hal_conf.h
+ *   2. Ensure hi2cX handles are declared extern in your project
+ */
+
+#define DEV_I2C_STM32_CUBE_MANAGED_HW_INIT  (1U)
+
+#ifdef HAL_I2C_MODULE_ENABLED
 #include "stm32h7xx_hal.h"
 
-/* STM32 I2C timing constants (HCLK-dependent, adjust for your clock tree) */
-#define DEV_I2C_STM32_TIMING_100KHZ   (0x10909CECU)
-#define DEV_I2C_STM32_TIMING_400KHZ   (0x00C0BAECU)
-#define DEV_I2C_STM32_TIMING_1MHZ     (0x00300B25U)
-
 typedef struct {
-    dev_i2c_bus_t     bus_id;
-    I2C_TypeDef      *instance;
-    GPIO_TypeDef     *scl_port;
-    uint16_t          scl_pin;
-    GPIO_TypeDef     *sda_port;
-    uint16_t          sda_pin;
-    uint32_t          gpio_alternate;
-    dev_i2c_speed_t   default_speed;
-    uint32_t          timing;
+    dev_i2c_bus_t   bus_id;
+    I2C_HandleTypeDef *handle;
+    dev_i2c_speed_t default_speed;
 } dev_i2c_hw_bus_t;
+
+#endif /* HAL_I2C_MODULE_ENABLED */
 
 #ifdef __cplusplus
 }
