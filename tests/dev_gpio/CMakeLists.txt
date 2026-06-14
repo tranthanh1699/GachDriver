@@ -6,18 +6,17 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 set(PROJECT_ROOT ${CMAKE_SOURCE_DIR}/../..)
 
-add_executable(gpio_test_host
-    ${PROJECT_ROOT}/drivers/dev_common/src/dev_common.c
-    ${PROJECT_ROOT}/drivers/dev_common/src/dev_assert.c
-    ${PROJECT_ROOT}/drivers/dev_gpio/src/dev_gpio.c
-    ${PROJECT_ROOT}/drivers/dev_gpio/port/mock/dev_gpio_port_mock.c
-    test_gpio.c
-)
+# Use mock port for host testing
+set(DEV_GPIO_PORT "mock" CACHE STRING "" FORCE)
+add_subdirectory(${PROJECT_ROOT}/drivers/dev_common ${CMAKE_BINARY_DIR}/dev_common)
+add_subdirectory(${PROJECT_ROOT}/drivers/dev_gpio ${CMAKE_BINARY_DIR}/dev_gpio)
 
+add_executable(gpio_test_host test_gpio.c)
+
+# Test code needs mock port inspection helpers
 target_include_directories(gpio_test_host PRIVATE
-    ${PROJECT_ROOT}/drivers/dev_common/include
-    ${PROJECT_ROOT}/drivers/dev_gpio/include
     ${PROJECT_ROOT}/drivers/dev_gpio/port/mock
 )
 
+target_link_libraries(gpio_test_host PRIVATE dev_common dev_gpio)
 target_compile_options(gpio_test_host PRIVATE -Wall -Wextra -Werror -pedantic)

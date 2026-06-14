@@ -43,22 +43,14 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 )
 
 # ── GPIO port selection ──
-set(DEV_GPIO_PORT "stm32")
+set(DEV_GPIO_PORT "stm32" CACHE STRING "GPIO port target: mock, stm32, esp32, nrf52")
 
-# Add sources to executable
-target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    drivers/dev_common/src/dev_common.c
-    drivers/dev_common/src/dev_assert.c
-    drivers/dev_gpio/src/dev_gpio.c
-    drivers/dev_gpio/port/${DEV_GPIO_PORT}/dev_gpio_port_${DEV_GPIO_PORT}.c
-)
+# ── Driver modules (each owns its own CMakeLists.txt) ──
+add_subdirectory(drivers/dev_common)
+add_subdirectory(drivers/dev_gpio)
 
-# Add include paths
-target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
-    drivers/dev_common/include
-    drivers/dev_gpio/include
-    drivers/dev_gpio/port/${DEV_GPIO_PORT}
-)
+# Link driver libraries to the executable
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE dev_common dev_gpio)
 
 # Add project symbols (macros)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
