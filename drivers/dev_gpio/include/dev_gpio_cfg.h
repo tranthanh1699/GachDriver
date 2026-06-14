@@ -12,8 +12,8 @@ extern "C" {
 #define DEV_GPIO_CFG_RUNTIME_CHECK_ENABLED (1U)
 
 /* Logical pin IDs — dense, 0..PIN_COUNT-1 */
-#define DEV_GPIO_LED_GREEN    ((dev_gpio_pin_t)0U)
-#define DEV_GPIO_LED_RED      ((dev_gpio_pin_t)1U)
+#define DEV_GPIO_LED_GREEN    0U
+#define DEV_GPIO_LED_RED      1U
 #define DEV_GPIO_CFG_PIN_COUNT (2U)
 
 #ifdef __cplusplus
