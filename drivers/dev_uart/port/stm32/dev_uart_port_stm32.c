@@ -1,4 +1,8 @@
 #include "dev_uart_port_stm32.h"
+#include "dev_compiler.h"
+
+#ifdef HAL_UART_MODULE_ENABLED
+
 #include "dev_ringbuf.h"
 #include "dev_common.h"
 
@@ -31,11 +35,6 @@ static bool               s_rx_running[DEV_UART_CFG_MAX_INSTANCES];
 
 static const dev_uart_hw_t *find_uart(dev_uart_id_t id)
     { return (id < DEV_UART_CFG_MAX_INSTANCES && s_uart_map[id].instance) ? &s_uart_map[id] : NULL; }
-
-static uint32_t stm32_baud(dev_uart_baudrate_t b)
-{
-    switch (b) { default: return b; }
-}
 
 static uint32_t stm32_word_len(dev_uart_data_bits_t d)
     { return (d == DEV_UART_DATA_BITS_9) ? UART_WORDLENGTH_9B : UART_WORDLENGTH_8B; }
@@ -99,111 +98,93 @@ static void stm32_clock_and_gpio(void)
         s_handles[i].Init.Mode         = UART_MODE_TX_RX;
         s_handles[i].Init.HwFlowCtl    = stm32_flow(u->flow_control);
         s_handles[i].Init.OverSampling = UART_OVERSAMPLING_16;
-        HAL_UART_Init(&s_handles[i]);
+        if (HAL_UART_Init(&s_handles[i]) != HAL_OK) {
+            return DEV_ERR_HW_FAILURE;
+        }
 
         dev_ringbuf_init(&s_rx_rings[i], u->rx_buffer, u->rx_buffer_size);
     }
+    return DEV_OK;
 }
-
-/* ── Port API ── */
 
 dev_err_t dev_uart_port_init(void)
 {
-    stm32_clock_and_gpio();
+    if (stm32_clock_and_gpio() != DEV_OK) return DEV_ERR_HW_FAILURE;
     return DEV_OK;
 }
-
 dev_err_t dev_uart_port_deinit(void)
-{
-    for (uint16_t i = 0U; i < DEV_UART_CFG_MAX_INSTANCES; i++)
-        if (s_uart_map[i].instance) HAL_UART_DeInit(&s_handles[i]);
-    return DEV_OK;
-}
+    { for (uint16_t i=0U;i<DEV_UART_CFG_MAX_INSTANCES;i++) if(s_uart_map[i].instance)HAL_UART_DeInit(&s_handles[i]); return DEV_OK; }
 
 dev_err_t dev_uart_port_config(dev_uart_id_t u, dev_uart_baudrate_t b,
                                dev_uart_data_bits_t db, dev_uart_stop_bits_t sb,
                                dev_uart_parity_t p, dev_uart_flow_control_t fc)
 {
-    const dev_uart_hw_t *h = find_uart(u);
-    if (!h) return DEV_ERR_INVALID_ARG;
+    if (!find_uart(u)) return DEV_ERR_INVALID_ARG;
     if (fc != DEV_UART_FLOW_CONTROL_NONE) return DEV_ERR_NOT_SUPPORTED;
-
-    s_handles[u].Init.BaudRate   = stm32_baud(b);
-    s_handles[u].Init.WordLength = stm32_word_len(db);
-    s_handles[u].Init.StopBits   = stm32_stop(sb);
-    s_handles[u].Init.Parity     = stm32_parity(p);
-    s_handles[u].Init.HwFlowCtl  = stm32_flow(fc);
+    s_handles[u].Init.BaudRate=b; s_handles[u].Init.WordLength=stm32_word_len(db);
+    s_handles[u].Init.StopBits=stm32_stop(sb); s_handles[u].Init.Parity=stm32_parity(p);
+    s_handles[u].Init.HwFlowCtl=stm32_flow(fc);
     return stm32_map(HAL_UART_Init(&s_handles[u]));
 }
 
 dev_err_t dev_uart_port_set_baudrate(dev_uart_id_t u, dev_uart_baudrate_t b)
+    { if(!find_uart(u))return DEV_ERR_INVALID_ARG; s_handles[u].Init.BaudRate=b; return stm32_map(HAL_UART_Init(&s_handles[u])); }
+
+dev_err_t dev_uart_port_write(dev_uart_id_t u, const uint8_t *d, uint16_t l, dev_uart_timeout_t to)
+    { if(!find_uart(u))return DEV_ERR_INVALID_ARG; return stm32_map(HAL_UART_Transmit(&s_handles[u],(uint8_t*)d,l,to)); }
+
+dev_err_t dev_uart_port_read(dev_uart_id_t u, uint8_t *data, uint16_t len, uint16_t *rl, dev_uart_timeout_t to)
 {
-    const dev_uart_hw_t *h = find_uart(u);
-    if (!h) return DEV_ERR_INVALID_ARG;
-    s_handles[u].Init.BaudRate = stm32_baud(b);
-    return stm32_map(HAL_UART_Init(&s_handles[u]));
+    if(!find_uart(u)){*rl=0U;return DEV_ERR_INVALID_ARG;}
+    *rl=0U;
+    while(*rl<len){uint8_t b; if(!dev_ringbuf_try_pop(&s_rx_rings[u],&b)){if(to==DEV_UART_TIMEOUT_NO_WAIT)return DEV_ERR_EMPTY;break;} data[(*rl)++]=b;}
+    DEV_UNUSED(to); return (*rl>0U)?DEV_OK:DEV_ERR_EMPTY;
 }
 
-dev_err_t dev_uart_port_write(dev_uart_id_t u, const uint8_t *d, uint16_t len, dev_uart_timeout_t to)
-{
-    if (!find_uart(u)) return DEV_ERR_INVALID_ARG;
-    return stm32_map(HAL_UART_Transmit(&s_handles[u], (uint8_t *)d, len, to));
-}
-
-dev_err_t dev_uart_port_read(dev_uart_id_t u, uint8_t *data, uint16_t len,
-                             uint16_t *read_len, dev_uart_timeout_t to)
-{
-    const dev_uart_hw_t *h = find_uart(u);
-    if (!h) { *read_len = 0U; return DEV_ERR_INVALID_ARG; }
-
-    *read_len = 0U;
-    uint32_t deadline = to;
-    while (*read_len < len) {
-        uint8_t byte;
-        if (!dev_ringbuf_try_pop(&s_rx_rings[u], &byte)) {
-            if (to == DEV_UART_TIMEOUT_NO_WAIT) return DEV_ERR_EMPTY;
-            if (deadline == DEV_UART_TIMEOUT_FOREVER) continue;
-            if (deadline == 0U) return DEV_ERR_TIMEOUT;
-            /* simple busy-wait: just try once without real delay */
-            break;
-        }
-        data[(*read_len)++] = byte;
-    }
-    DEV_UNUSED(h); return (*read_len > 0U) ? DEV_OK : DEV_ERR_EMPTY;
-}
-
-uint16_t dev_uart_port_rx_available(dev_uart_id_t u)
-    { return (uint16_t)dev_ringbuf_available(&s_rx_rings[u]); }
-
-dev_err_t dev_uart_port_flush_rx(dev_uart_id_t u)
-    { if (!find_uart(u)) return DEV_ERR_INVALID_ARG; dev_ringbuf_flush(&s_rx_rings[u]); return DEV_OK; }
-dev_err_t dev_uart_port_flush_tx(dev_uart_id_t u)
-    { DEV_UNUSED(u); return DEV_OK; }
-
+uint16_t dev_uart_port_rx_available(dev_uart_id_t u) { return (uint16_t)dev_ringbuf_available(&s_rx_rings[u]); }
+dev_err_t dev_uart_port_flush_rx(dev_uart_id_t u)    { if(!find_uart(u))return DEV_ERR_INVALID_ARG; dev_ringbuf_flush(&s_rx_rings[u]); return DEV_OK; }
+dev_err_t dev_uart_port_flush_tx(dev_uart_id_t u)    { DEV_UNUSED(u); return DEV_OK; }
 dev_err_t dev_uart_port_rx_start(dev_uart_id_t u)
 {
     if (!find_uart(u)) return DEV_ERR_INVALID_ARG;
-    s_rx_running[u] = true;
-    return stm32_map(HAL_UART_Receive_IT(&s_handles[u], &s_rx_byte[u], DEV_UART_STM32_RX_TEMP_BYTE_COUNT));
+    dev_err_t e = stm32_map(HAL_UART_Receive_IT(&s_handles[u], &s_rx_byte[u], DEV_UART_STM32_RX_TEMP_BYTE_COUNT));
+    if (e == DEV_OK) s_rx_running[u] = true;
+    return e;
 }
 
 dev_err_t dev_uart_port_rx_stop(dev_uart_id_t u)
-{
-    if (!find_uart(u)) return DEV_ERR_INVALID_ARG;
-    s_rx_running[u] = false;
-    HAL_UART_AbortReceive_IT(&s_handles[u]);
-    return DEV_OK;
-}
-
-/* ── ISR callbacks ── */
+    { if(!find_uart(u))return DEV_ERR_INVALID_ARG; s_rx_running[u]=false; HAL_UART_AbortReceive_IT(&s_handles[u]); return DEV_OK; }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     for (uint16_t i = 0U; i < DEV_UART_CFG_MAX_INSTANCES; i++) {
         if (huart == &s_handles[i] && s_rx_running[i]) {
             (void)dev_ringbuf_try_push(&s_rx_rings[i], s_rx_byte[i]);
-            (void)HAL_UART_Receive_IT(&s_handles[i], &s_rx_byte[i], DEV_UART_STM32_RX_TEMP_BYTE_COUNT);
+            if (HAL_UART_Receive_IT(&s_handles[i], &s_rx_byte[i], DEV_UART_STM32_RX_TEMP_BYTE_COUNT) != HAL_OK) {
+                s_rx_running[i] = false;  /* stop RX on re-arm failure */
+            }
             return;
         }
     }
 }
+
+#else /* HAL_UART_MODULE_ENABLED not defined */
+
+dev_err_t dev_uart_port_init(void)                { return DEV_ERR_NOT_SUPPORTED; }
+dev_err_t dev_uart_port_deinit(void)              { return DEV_ERR_NOT_SUPPORTED; }
+dev_err_t dev_uart_port_config(dev_uart_id_t u, dev_uart_baudrate_t b, dev_uart_data_bits_t d,
+                               dev_uart_stop_bits_t s, dev_uart_parity_t p, dev_uart_flow_control_t f)
+    { DEV_UNUSED(u);DEV_UNUSED(b);DEV_UNUSED(d);DEV_UNUSED(s);DEV_UNUSED(p);DEV_UNUSED(f); return DEV_ERR_NOT_SUPPORTED; }
+dev_err_t dev_uart_port_set_baudrate(dev_uart_id_t u, dev_uart_baudrate_t b)
+    { DEV_UNUSED(u);DEV_UNUSED(b); return DEV_ERR_NOT_SUPPORTED; }
+dev_err_t dev_uart_port_write(dev_uart_id_t u, const uint8_t *d, uint16_t l, dev_uart_timeout_t t)
+    { DEV_UNUSED(u);DEV_UNUSED(d);DEV_UNUSED(l);DEV_UNUSED(t); return DEV_ERR_NOT_SUPPORTED; }
+dev_err_t dev_uart_port_read(dev_uart_id_t u, uint8_t *d, uint16_t l, uint16_t *rl, dev_uart_timeout_t t)
+    { DEV_UNUSED(u);DEV_UNUSED(d);DEV_UNUSED(l);DEV_UNUSED(t); *rl=0U; return DEV_ERR_NOT_SUPPORTED; }
+uint16_t dev_uart_port_rx_available(dev_uart_id_t u) { DEV_UNUSED(u); return 0U; }
+dev_err_t dev_uart_port_flush_rx(dev_uart_id_t u)  { DEV_UNUSED(u); return DEV_ERR_NOT_SUPPORTED; }
+dev_err_t dev_uart_port_flush_tx(dev_uart_id_t u)  { DEV_UNUSED(u); return DEV_ERR_NOT_SUPPORTED; }
+dev_err_t dev_uart_port_rx_start(dev_uart_id_t u)  { DEV_UNUSED(u); return DEV_ERR_NOT_SUPPORTED; }
+dev_err_t dev_uart_port_rx_stop(dev_uart_id_t u)   { DEV_UNUSED(u); return DEV_ERR_NOT_SUPPORTED; }
+
+#endif /* HAL_UART_MODULE_ENABLED */
