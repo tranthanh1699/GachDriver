@@ -4,9 +4,10 @@
 
 Hardware-independent UART driver using logical UART IDs. Application code never includes vendor HAL headers.
 
-- **TX**: blocking write with timeout
-- **RX**: non-blocking buffered read (reads from `dev_ringbuf` on STM32, ESP-IDF internal buffer on ESP32)
-- **Timeout semantics**: TX blocks until complete or timeout. RX reads from buffer immediately; `DEV_UART_TIMEOUT_NO_WAIT` returns `DEV_ERR_EMPTY` if no data, `DEV_UART_TIMEOUT_FOREVER` is reserved for future async use.
+- **TX**: blocking write with timeout via HAL
+- **RX**: non-blocking buffered read via `dev_ringbuf`
+- **STM32**: wraps existing Cube-generated HAL handles (`huart1`, `huart2`...) — no GPIO/clock/NVIC init
+- **Timeout**: TX blocks until complete or timeout. RX reads from buffer immediately; `DEV_UART_TIMEOUT_NO_WAIT` returns `DEV_ERR_EMPTY`
 
 ## 2. Quick Start
 
@@ -22,30 +23,61 @@ if (dev_uart_read_byte(DEV_UART_CONSOLE, &byte, DEV_UART_TIMEOUT_NO_WAIT) == DEV
 }
 ```
 
-## 3. API
+## 3. STM32 Cube-Managed Mode
 
-| Function | Blocking | Returns |
-|----------|----------|---------|
-| `init()` / `deinit()` | — | `dev_err_t` |
-| `config(uart, baud, data, stop, parity, flow)` | — | `dev_err_t` |
-| `write(uart, data, len, timeout)` | Yes | `dev_err_t` |
-| `write_byte(uart, byte, timeout)` | Yes | `dev_err_t` |
-| `write_string(uart, str, timeout)` | Yes | `dev_err_t` (truncates at `DEV_UART_CFG_MAX_STRING_LENGTH`) |
-| `read(uart, data, len, *read_len, timeout)` | No | `dev_err_t`, `DEV_ERR_EMPTY` if no data with `NO_WAIT` |
-| `read_byte(uart, *byte, timeout)` | No | `dev_err_t` |
-| `rx_available(uart)` | No | `uint16_t` byte count |
-| `flush_rx(uart)` / `flush_tx(uart)` | — | `dev_err_t` |
-| `rx_start(uart)` / `rx_stop(uart)` | — | `dev_err_t` |
+The STM32 port assumes CubeMX/CubeIDE has already configured:
+- GPIO alternate function for TX/RX
+- UART peripheral clock
+- NVIC priority
+- HAL UART init (`huart1`, `huart2`...)
 
-## 4. RX Model
+The port only wraps handles and manages RX buffering via `dev_ringbuf`.
 
-RX is **non-blocking buffered**: UART ISR pushes bytes into a ring buffer; `dev_uart_read()` pulls from the buffer without blocking. Use `dev_uart_rx_available()` to check before reading, or pass `DEV_UART_TIMEOUT_NO_WAIT` to avoid busy-wait.
-
-## 5. STM32 Enable Steps
-
+### Enable Steps
 1. Uncomment `#define HAL_UART_MODULE_ENABLED` in `Core/Inc/stm32h7xx_hal_conf.h`
-2. Add `stm32h7xx_hal_uart.c` to the STM32_Drivers library in `cmake/stm32cubemx/CMakeLists.txt`
-3. Rebuild
+2. Add `stm32h7xx_hal_uart.c` to `cmake/stm32cubemx/CMakeLists.txt`
+3. In `Core/Src/stm32h7xx_it.c`, add:
+```c
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    dev_uart_port_stm32_rx_cplt_callback(huart);
+}
+```
+4. Ensure `huart1`, `huart2` are declared `extern` in your project
+
+### STM32 UART Map (`dev_uart_port_stm32.c`)
+```c
+extern UART_HandleTypeDef huart1;
+extern UART_HandleTypeDef huart2;
+
+static const dev_uart_hw_t s_uart_map[] = {
+    [DEV_UART_CONSOLE] = { DEV_UART_CONSOLE, &huart1, 115200, rx_buf, 256 },
+    [DEV_UART_GNSS]    = { DEV_UART_GNSS,    &huart2, 9600,   rx_buf2, 512 },
+};
+```
+
+## 4. RX Buffering Model
+
+```
+HAL_UART_RxCpltCallback → dev_uart_port_stm32_rx_cplt_callback
+                        → dev_ringbuf_write(rx_ring, byte)
+                        → HAL_UART_Receive_IT(re-arm)
+dev_uart_read()         → dev_ringbuf_pop(rx_ring, &byte) → return to app
+```
+
+## 5. API
+
+| Function | Blocking | Key Returns |
+|----------|----------|-------------|
+| `init()` / `deinit()` | — | `DEV_OK`, `DEV_ERR_ALREADY_INITIALIZED`, `DEV_ERR_NOT_INITIALIZED` |
+| `config(uart, baud, data, stop, parity, flow)` | — | `DEV_OK`, `DEV_ERR_NOT_SUPPORTED` (flow ctl) |
+| `write(uart, data, len, timeout)` | Yes | `DEV_OK`, `DEV_ERR_TIMEOUT` |
+| `read(uart, data, len, *read_len, timeout)` | No | `DEV_OK`, `DEV_ERR_EMPTY` |
+| `read_byte(uart, *byte, timeout)` | No | `DEV_OK`, `DEV_ERR_EMPTY` |
+| `write_string(uart, str, timeout)` | Yes | `DEV_OK`, truncates at `DEV_UART_CFG_MAX_STRING_LENGTH` (256) |
+| `rx_available(uart)` | No | byte count from ringbuf |
+| `rx_start(uart)` / `rx_stop(uart)` | — | start/stop HAL UART RX interrupt |
+| `flush_rx(uart)` / `flush_tx(uart)` | — | clear ringbuf |
 
 ## 6. Build
 
@@ -57,4 +89,4 @@ target_link_libraries(${PROJECT_NAME} dev_uart)
 
 ## 7. Porting
 
-Each port implements 11 functions from `dev_uart_port.h`. STM32 uses `dev_ringbuf` for RX. ESP32 stub returns `DEV_ERR_NOT_SUPPORTED` — complete the stub with ESP-IDF UART driver calls.
+Each port implements 11 functions from `dev_uart_port.h`. STM32 uses Cube handles + `dev_ringbuf`. Mock uses `dev_ringbuf`. ESP32/nRF52 are stubs returning `DEV_ERR_NOT_SUPPORTED`.
