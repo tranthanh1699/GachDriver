@@ -176,6 +176,12 @@ void dev_uart_port_stm32_rx_cplt_callback(UART_HandleTypeDef *huart)
     }
 }
 
+/* STM32 Interrupt Handlers */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    dev_uart_port_stm32_rx_cplt_callback(huart);
+}
+
 #else /* HAL_UART_MODULE_ENABLED not defined */
 
 dev_err_t dev_uart_port_init(void)                { return DEV_ERR_NOT_SUPPORTED; }

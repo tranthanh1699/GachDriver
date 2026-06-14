@@ -23,6 +23,7 @@ extern "C" {
 #define DEV_UART_BAUDRATE_115200               (115200UL)
 #define DEV_UART_BAUDRATE_921600               (921600UL)
 
+/** UART ID, USER need config */
 #define DEV_UART_CONSOLE                       ((dev_uart_id_t)0U)
 
 #define DEV_UART_CONSOLE_RX_BUFFER_SIZE        (256U)

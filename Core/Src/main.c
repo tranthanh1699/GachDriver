@@ -23,8 +23,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "dev_gpio.h"
 #include "dev_common.h"
+#include "dev_uart.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -95,17 +95,8 @@ int main(void)
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
 
-  /* ── dev_gpio X-Macro example ── */
-  {
-      dev_err_t err;
-
-      err = dev_gpio_init();
-      if (err != DEV_OK)
-      {
-          Error_Handler();
-      }
-  }
-
+  dev_uart_init();
+  dev_uart_write(DEV_UART_CONSOLE, (const uint8_t *)"Hello World!\r\n", 14, DEV_UART_TIMEOUT_DEFAULT_MS);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -115,9 +106,11 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    dev_gpio_toggle(DEV_GPIO_LED_GREEN);
-    dev_gpio_toggle(DEV_GPIO_LED_RED);
-    HAL_Delay(100);
+    if(dev_uart_rx_available(DEV_UART_CONSOLE) > 0U) {
+      uint8_t data;
+      dev_uart_read_byte(DEV_UART_CONSOLE, &data, DEV_UART_TIMEOUT_NO_WAIT);
+      dev_uart_write(DEV_UART_CONSOLE, &data, 1, DEV_UART_TIMEOUT_DEFAULT_MS);
+    }
   }
   /* USER CODE END 3 */
 }
