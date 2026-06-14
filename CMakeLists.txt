@@ -47,11 +47,13 @@ set(DEV_GPIO_PORT "stm32" CACHE STRING "GPIO port: mock, stm32")
 add_subdirectory(drivers/dev_common)
 add_subdirectory(drivers/dev_gpio)
 add_subdirectory(drivers/dev_list)
+add_subdirectory(drivers/dev_crc)
 
 target_link_libraries(${CMAKE_PROJECT_NAME}
     dev_common
     dev_gpio
     dev_list
+    dev_crc
 )
 
 # Add project symbols (macros)
