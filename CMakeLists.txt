@@ -50,6 +50,7 @@ add_subdirectory(drivers/dev_gpio)
 add_subdirectory(drivers/dev_i2c)
 add_subdirectory(drivers/dev_list)
 add_subdirectory(drivers/dev_crc)
+add_subdirectory(drivers/dev_ringbuf)
 
 target_link_libraries(${CMAKE_PROJECT_NAME}
     dev_common
@@ -57,6 +58,7 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     dev_i2c
     dev_list
     dev_crc
+    dev_ringbuf
 )
 
 # Add project symbols (macros)
