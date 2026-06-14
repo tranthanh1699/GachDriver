@@ -35,7 +35,7 @@ typedef struct
  * @brief Initialize CRC-8 context (poly 0x07, init 0x00, xor_out 0x00).
  *
  * @param ctx CRC context.
- * @return DEV_OK on success, or an error code.
+ * @return DEV_OK on success, or DEV_ERR_NULL_PTR if ctx is NULL.
  */
 dev_err_t dev_crc8_init(dev_crc8_ctx_t *ctx);
 
@@ -45,7 +45,7 @@ dev_err_t dev_crc8_init(dev_crc8_ctx_t *ctx);
  * @param ctx CRC context.
  * @param data Input buffer.
  * @param len Input buffer length in bytes.
- * @return DEV_OK on success, or an error code.
+ * @return DEV_OK on success, or DEV_ERR_NULL_PTR if a required pointer is NULL.
  */
 dev_err_t dev_crc8_update(dev_crc8_ctx_t *ctx, const uint8_t *data, size_t len);
 
@@ -54,7 +54,7 @@ dev_err_t dev_crc8_update(dev_crc8_ctx_t *ctx, const uint8_t *data, size_t len);
  *
  * @param ctx CRC context.
  * @param out_crc Output CRC value.
- * @return DEV_OK on success, or an error code.
+ * @return DEV_OK on success, or DEV_ERR_NULL_PTR if a required pointer is NULL.
  */
 dev_err_t dev_crc8_final(const dev_crc8_ctx_t *ctx, uint8_t *out_crc);
 
@@ -64,7 +64,7 @@ dev_err_t dev_crc8_final(const dev_crc8_ctx_t *ctx, uint8_t *out_crc);
  * @param data Input buffer.
  * @param len Input buffer length in bytes.
  * @param out_crc Output CRC value.
- * @return DEV_OK on success, or an error code.
+ * @return DEV_OK on success, or DEV_ERR_NULL_PTR if a required pointer is NULL.
  */
 dev_err_t dev_crc8_compute(const uint8_t *data, size_t len, uint8_t *out_crc);
 
@@ -72,7 +72,7 @@ dev_err_t dev_crc8_compute(const uint8_t *data, size_t len, uint8_t *out_crc);
  * @brief Initialize CRC-16 context (poly 0xA001 reflected, init 0xFFFF, xor_out 0x0000).
  *
  * @param ctx CRC context.
- * @return DEV_OK on success, or an error code.
+ * @return DEV_OK on success, or DEV_ERR_NULL_PTR if a required pointer is NULL.
  */
 dev_err_t dev_crc16_init(dev_crc16_ctx_t *ctx);
 
@@ -82,7 +82,7 @@ dev_err_t dev_crc16_init(dev_crc16_ctx_t *ctx);
  * @param ctx CRC context.
  * @param data Input buffer.
  * @param len Input buffer length in bytes.
- * @return DEV_OK on success, or an error code.
+ * @return DEV_OK on success, or DEV_ERR_NULL_PTR if a required pointer is NULL.
  */
 dev_err_t dev_crc16_update(dev_crc16_ctx_t *ctx, const uint8_t *data, size_t len);
 
@@ -91,7 +91,7 @@ dev_err_t dev_crc16_update(dev_crc16_ctx_t *ctx, const uint8_t *data, size_t len
  *
  * @param ctx CRC context.
  * @param out_crc Output CRC value.
- * @return DEV_OK on success, or an error code.
+ * @return DEV_OK on success, or DEV_ERR_NULL_PTR if a required pointer is NULL.
  */
 dev_err_t dev_crc16_final(const dev_crc16_ctx_t *ctx, uint16_t *out_crc);
 
@@ -101,7 +101,7 @@ dev_err_t dev_crc16_final(const dev_crc16_ctx_t *ctx, uint16_t *out_crc);
  * @param data Input buffer.
  * @param len Input buffer length in bytes.
  * @param out_crc Output CRC value.
- * @return DEV_OK on success, or an error code.
+ * @return DEV_OK on success, or DEV_ERR_NULL_PTR if a required pointer is NULL.
  */
 dev_err_t dev_crc16_compute(const uint8_t *data, size_t len, uint16_t *out_crc);
 
@@ -109,7 +109,7 @@ dev_err_t dev_crc16_compute(const uint8_t *data, size_t len, uint16_t *out_crc);
  * @brief Initialize CRC-32 context (poly 0xEDB88320 reflected, init 0xFFFFFFFF, xor_out 0xFFFFFFFF).
  *
  * @param ctx CRC context.
- * @return DEV_OK on success, or an error code.
+ * @return DEV_OK on success, or DEV_ERR_NULL_PTR if a required pointer is NULL.
  */
 dev_err_t dev_crc32_init(dev_crc32_ctx_t *ctx);
 
@@ -119,7 +119,7 @@ dev_err_t dev_crc32_init(dev_crc32_ctx_t *ctx);
  * @param ctx CRC context.
  * @param data Input buffer.
  * @param len Input buffer length in bytes.
- * @return DEV_OK on success, or an error code.
+ * @return DEV_OK on success, or DEV_ERR_NULL_PTR if a required pointer is NULL.
  */
 dev_err_t dev_crc32_update(dev_crc32_ctx_t *ctx, const uint8_t *data, size_t len);
 
@@ -128,7 +128,7 @@ dev_err_t dev_crc32_update(dev_crc32_ctx_t *ctx, const uint8_t *data, size_t len
  *
  * @param ctx CRC context.
  * @param out_crc Output CRC value.
- * @return DEV_OK on success, or an error code.
+ * @return DEV_OK on success, or DEV_ERR_NULL_PTR if a required pointer is NULL.
  */
 dev_err_t dev_crc32_final(const dev_crc32_ctx_t *ctx, uint32_t *out_crc);
 
@@ -138,7 +138,7 @@ dev_err_t dev_crc32_final(const dev_crc32_ctx_t *ctx, uint32_t *out_crc);
  * @param data Input buffer.
  * @param len Input buffer length in bytes.
  * @param out_crc Output CRC value.
- * @return DEV_OK on success, or an error code.
+ * @return DEV_OK on success, or DEV_ERR_NULL_PTR if a required pointer is NULL.
  */
 dev_err_t dev_crc32_compute(const uint8_t *data, size_t len, uint32_t *out_crc);
 
