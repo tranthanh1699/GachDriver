@@ -15,3 +15,8 @@ target_include_directories(dev_gpio
 )
 
 target_link_libraries(dev_gpio PUBLIC dev_common)
+
+# STM32 port needs HAL headers and device defines from CubeMX
+if(DEV_GPIO_PORT STREQUAL "stm32")
+    target_link_libraries(dev_gpio PRIVATE stm32cubemx)
+endif()
