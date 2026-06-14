@@ -6,7 +6,7 @@ extern "C" {
 #endif
 
 #include "dev_uart_port.h"
-
+#include "stm32h7xx_hal.h"
 /*
  * STM32 Cube-managed UART port.
  *

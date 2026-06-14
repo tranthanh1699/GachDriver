@@ -7,7 +7,7 @@ extern "C" {
 
 #include "dev_uart_types.h"
 
-#define DEV_UART_CFG_MAX_INSTANCES             (3U)
+#define DEV_UART_CFG_MAX_INSTANCES             (1U)
 #define DEV_UART_CFG_RUNTIME_CHECK_ENABLED     (1U)
 #define DEV_UART_CFG_RX_BUFFER_ENABLED         (1U)
 
@@ -24,8 +24,6 @@ extern "C" {
 #define DEV_UART_BAUDRATE_921600               (921600UL)
 
 #define DEV_UART_CONSOLE                       ((dev_uart_id_t)0U)
-#define DEV_UART_GNSS                          ((dev_uart_id_t)1U)
-#define DEV_UART_MODEM                         ((dev_uart_id_t)2U)
 
 #define DEV_UART_CONSOLE_RX_BUFFER_SIZE        (256U)
 #define DEV_UART_GNSS_RX_BUFFER_SIZE           (512U)

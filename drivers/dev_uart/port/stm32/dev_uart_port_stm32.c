@@ -10,12 +10,8 @@
  * If your handles are named differently, update the map below.
  */
 extern UART_HandleTypeDef huart1;
-extern UART_HandleTypeDef huart2;
-extern UART_HandleTypeDef huart3;
 
 static uint8_t s_console_rx_buf[DEV_UART_CONSOLE_RX_BUFFER_SIZE];
-static uint8_t s_gnss_rx_buf[DEV_UART_GNSS_RX_BUFFER_SIZE];
-static uint8_t s_modem_rx_buf[DEV_UART_MODEM_RX_BUFFER_SIZE];
 
 static dev_ringbuf_t s_rx_rings[DEV_UART_CFG_MAX_INSTANCES];
 static uint8_t       s_rx_byte[DEV_UART_CFG_MAX_INSTANCES];
@@ -23,11 +19,7 @@ static bool          s_rx_running[DEV_UART_CFG_MAX_INSTANCES];
 
 static const dev_uart_hw_t s_uart_map[DEV_UART_CFG_MAX_INSTANCES] = {
     [DEV_UART_CONSOLE] = { DEV_UART_CONSOLE, &huart1,
-        DEV_UART_BAUDRATE_115200, s_console_rx_buf, DEV_UART_CONSOLE_RX_BUFFER_SIZE },
-    [DEV_UART_GNSS]    = { DEV_UART_GNSS, &huart2,
-        DEV_UART_BAUDRATE_9600, s_gnss_rx_buf, DEV_UART_GNSS_RX_BUFFER_SIZE },
-    [DEV_UART_MODEM]   = { DEV_UART_MODEM, &huart3,
-        DEV_UART_BAUDRATE_115200, s_modem_rx_buf, DEV_UART_MODEM_RX_BUFFER_SIZE },
+        DEV_UART_BAUDRATE_115200, s_console_rx_buf, DEV_UART_CONSOLE_RX_BUFFER_SIZE }
 };
 
 static const dev_uart_hw_t *find_uart(dev_uart_id_t id)
