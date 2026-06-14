@@ -20,7 +20,9 @@ typedef enum {
     DEV_ERR_BUSY,
     DEV_ERR_OUT_OF_RANGE,
     DEV_ERR_HW_FAILURE,
-    DEV_ERR_CONFIG
+    DEV_ERR_CONFIG,
+    DEV_ERR_NO_ACK,
+    DEV_ERR_BUS
 } dev_err_t;
 
 #ifdef __cplusplus

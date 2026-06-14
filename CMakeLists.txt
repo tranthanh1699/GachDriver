@@ -44,14 +44,17 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # ── Driver modules (each owns its own CMakeLists.txt) ──
 set(DEV_GPIO_PORT "stm32" CACHE STRING "GPIO port: mock, stm32")
+set(DEV_I2C_PORT  "stm32" CACHE STRING "I2C port: mock, stm32, esp32")
 add_subdirectory(drivers/dev_common)
 add_subdirectory(drivers/dev_gpio)
+add_subdirectory(drivers/dev_i2c)
 add_subdirectory(drivers/dev_list)
 add_subdirectory(drivers/dev_crc)
 
 target_link_libraries(${CMAKE_PROJECT_NAME}
     dev_common
     dev_gpio
+    dev_i2c
     dev_list
     dev_crc
 )
