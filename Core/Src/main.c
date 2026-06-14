@@ -24,7 +24,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "dev_common.h"
-#include "dev_uart.h"
+#include "dev_log.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -57,7 +57,7 @@ static void MPU_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+CONFIG_LOG_TAG(main, true)
 /* USER CODE END 0 */
 
 /**
@@ -95,8 +95,7 @@ int main(void)
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
 
-  dev_uart_init();
-  dev_uart_write(DEV_UART_CONSOLE, (const uint8_t *)"Hello World!\r\n", 14, DEV_UART_TIMEOUT_DEFAULT_MS);
+  dev_log_init(DEV_UART_CONSOLE);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -106,11 +105,12 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    if(dev_uart_rx_available(DEV_UART_CONSOLE) > 0U) {
-      uint8_t data;
-      dev_uart_read_byte(DEV_UART_CONSOLE, &data, DEV_UART_TIMEOUT_NO_WAIT);
-      dev_uart_write(DEV_UART_CONSOLE, &data, 1, DEV_UART_TIMEOUT_DEFAULT_MS);
-    }
+    DEV_LOG_INF("Hello, GachDriver!");
+    DEV_LOG_WRN("This is a warning message.");
+    DEV_LOG_ERR("This is an error message.");
+    uint8_t data[] = {0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04};
+    DEV_LOG_HEX(data, sizeof(data));
+    HAL_Delay(1000);
   }
   /* USER CODE END 3 */
 }
