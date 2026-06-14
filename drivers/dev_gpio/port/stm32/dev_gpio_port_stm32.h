@@ -11,8 +11,10 @@ extern "C" {
 
 /*
  * X-Macro pin list — ONE line per pin.
- * Auto-generates enum, map, and count.
- * This is the ONLY place you edit to add/remove pins.
+ * Format: X(NAME, PORT, PIN, MODE, PULL)
+ *
+ * Automatically generates s_gpio_map[] in the .c file.
+ * Pin IDs (DEV_GPIO_LED_GREEN etc.) are defined in dev_gpio_cfg.h.
  */
 #define DEV_GPIO_PIN_LIST(X)                                                     \
     X(LED_GREEN, GPIOB, GPIO_PIN_0, DEV_GPIO_PORT_MODE_OUTPUT, DEV_GPIO_PULL_NONE) \
@@ -25,18 +27,6 @@ typedef enum {
     DEV_GPIO_PORT_MODE_INPUT_PULLUP,
     DEV_GPIO_PORT_MODE_INPUT_PULLDOWN
 } dev_gpio_port_mode_t;
-
-/* Auto-generated logical pin ID → matches dev_gpio_cfg.h #defines */
-typedef enum {
-#define DEV_GPIO_PORT_DECLARE_ID(name, port, pin, mode, pull) \
-    DEV_GPIO_##name,
-
-    DEV_GPIO_PIN_LIST(DEV_GPIO_PORT_DECLARE_ID)
-
-#undef DEV_GPIO_PORT_DECLARE_ID
-
-    DEV_GPIO_CFG_PIN_COUNT
-} dev_gpio_logical_pin_id_t;
 
 /* STM32 hardware pin descriptor */
 typedef struct {
