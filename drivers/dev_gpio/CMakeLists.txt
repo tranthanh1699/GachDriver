@@ -1,22 +1,11 @@
-# GPIO port selection — set before including this file, or defaults to mock
-if(NOT DEFINED DEV_GPIO_PORT)
-    set(DEV_GPIO_PORT "mock" CACHE STRING "GPIO port target: mock, stm32, esp32, nrf52")
-endif()
-message(STATUS "dev_gpio: using port '${DEV_GPIO_PORT}'")
-
 add_library(dev_gpio STATIC
+    src/dev_gpio_cfg.c
     src/dev_gpio.c
-    port/${DEV_GPIO_PORT}/dev_gpio_port_${DEV_GPIO_PORT}.c
 )
 
-target_include_directories(dev_gpio
-    PUBLIC  include
-    PRIVATE port/${DEV_GPIO_PORT}
+target_include_directories(dev_gpio PUBLIC include)
+
+target_link_libraries(dev_gpio
+    PUBLIC  dev_common
+    PRIVATE stm32cubemx
 )
-
-target_link_libraries(dev_gpio PUBLIC dev_common)
-
-# STM32 port needs HAL headers and device defines from CubeMX
-if(DEV_GPIO_PORT STREQUAL "stm32")
-    target_link_libraries(dev_gpio PRIVATE stm32cubemx)
-endif()

@@ -42,9 +42,6 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
 )
 
-# ── GPIO port selection ──
-set(DEV_GPIO_PORT "stm32" CACHE STRING "GPIO port target: mock, stm32, esp32, nrf52")
-
 # ── Driver modules (each owns its own CMakeLists.txt) ──
 add_subdirectory(drivers/dev_common)
 add_subdirectory(drivers/dev_gpio)

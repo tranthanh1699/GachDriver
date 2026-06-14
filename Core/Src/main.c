@@ -92,19 +92,15 @@ int main(void)
   MX_GPIO_Init();
   /* USER CODE BEGIN 2 */
 
-  /* ── dev_gpio simplified wrapper: blink both LEDs ── */
+  /* ── dev_gpio X-Macro example ── */
   {
       dev_err_t err;
 
-      err = dev_gpio_init();
+      err = DevGpio_Init();
       if (err != DEV_OK)
       {
           Error_Handler();
       }
-
-      /* Configure both pins as outputs */
-      (void)dev_gpio_output(DEV_GPIO_LED_STATUS);
-      (void)dev_gpio_output(DEV_GPIO_BUTTON_USER);
   }
 
   /* USER CODE END 2 */
@@ -117,8 +113,8 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     {
-        (void)dev_gpio_toggle(DEV_GPIO_LED_STATUS);
-        (void)dev_gpio_toggle(DEV_GPIO_BUTTON_USER);
+        (void)DevGpio_Toggle(DEV_GPIO_LED_STATUS);
+        (void)DevGpio_Toggle(DEV_GPIO_BUTTON_USER);
 
         for (volatile uint32_t d = 0U; d < 5000000U; d++) { /* ~500ms */ }
     }
