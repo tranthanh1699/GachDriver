@@ -15,13 +15,6 @@ typedef enum {
 } dev_gpio_level_t;
 
 typedef enum {
-    DEV_GPIO_MODE_INPUT = 0,
-    DEV_GPIO_MODE_OUTPUT,
-    DEV_GPIO_MODE_INPUT_PULLUP,
-    DEV_GPIO_MODE_INPUT_PULLDOWN
-} dev_gpio_mode_t;
-
-typedef enum {
     DEV_GPIO_PULL_NONE = 0,
     DEV_GPIO_PULL_UP,
     DEV_GPIO_PULL_DOWN

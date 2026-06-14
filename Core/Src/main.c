@@ -112,12 +112,9 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    {
-        (void)dev_gpio_toggle(DEV_GPIO_LED_STATUS);
-        (void)dev_gpio_toggle(DEV_GPIO_BUTTON_USER);
-
-        for (volatile uint32_t d = 0U; d < 5000000U; d++) { /* ~500ms */ }
-    }
+    dev_gpio_toggle(DEV_GPIO_LED_GREEN);
+    dev_gpio_toggle(DEV_GPIO_LED_RED);
+    HAL_Delay(500);
   }
   /* USER CODE END 3 */
 }

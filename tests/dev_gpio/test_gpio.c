@@ -88,9 +88,9 @@ TEST(2_double_init)
 TEST(3_output_high)
 {
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_output(DEV_GPIO_LED_STATUS), DEV_OK, "output");
-    CHECK_EQ(dev_gpio_high(DEV_GPIO_LED_STATUS), DEV_OK, "high");
-    CHECK_EQ(dev_gpio_port_mock_get_level(DEV_GPIO_LED_STATUS), (int)DEV_GPIO_LEVEL_HIGH, "level HIGH");
+    CHECK_EQ(dev_gpio_output(DEV_GPIO_LED_GREEN), DEV_OK, "output");
+    CHECK_EQ(dev_gpio_high(DEV_GPIO_LED_GREEN), DEV_OK, "high");
+    CHECK_EQ(dev_gpio_port_mock_get_level(DEV_GPIO_LED_GREEN), (int)DEV_GPIO_LEVEL_HIGH, "level HIGH");
     printf("    PASS\n"); g_passes++;
 }
 
@@ -98,9 +98,9 @@ TEST(3_output_high)
 TEST(4_output_low)
 {
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_output(DEV_GPIO_LED_STATUS), DEV_OK, "output");
-    CHECK_EQ(dev_gpio_low(DEV_GPIO_LED_STATUS), DEV_OK, "low");
-    CHECK_EQ(dev_gpio_port_mock_get_level(DEV_GPIO_LED_STATUS), (int)DEV_GPIO_LEVEL_LOW, "level LOW");
+    CHECK_EQ(dev_gpio_output(DEV_GPIO_LED_GREEN), DEV_OK, "output");
+    CHECK_EQ(dev_gpio_low(DEV_GPIO_LED_GREEN), DEV_OK, "low");
+    CHECK_EQ(dev_gpio_port_mock_get_level(DEV_GPIO_LED_GREEN), (int)DEV_GPIO_LEVEL_LOW, "level LOW");
     printf("    PASS\n"); g_passes++;
 }
 
@@ -108,8 +108,8 @@ TEST(4_output_low)
 TEST(5_output_level_high)
 {
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_output_level(DEV_GPIO_LED_STATUS, DEV_GPIO_LEVEL_HIGH), DEV_OK, "output_level");
-    CHECK_EQ(dev_gpio_port_mock_get_level(DEV_GPIO_LED_STATUS), (int)DEV_GPIO_LEVEL_HIGH, "level HIGH");
+    CHECK_EQ(dev_gpio_output_level(DEV_GPIO_LED_GREEN, DEV_GPIO_LEVEL_HIGH), DEV_OK, "output_level");
+    CHECK_EQ(dev_gpio_port_mock_get_level(DEV_GPIO_LED_GREEN), (int)DEV_GPIO_LEVEL_HIGH, "level HIGH");
     printf("    PASS\n"); g_passes++;
 }
 
@@ -117,8 +117,8 @@ TEST(5_output_level_high)
 TEST(6_output_level_low)
 {
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_output_level(DEV_GPIO_LED_STATUS, DEV_GPIO_LEVEL_LOW), DEV_OK, "output_level");
-    CHECK_EQ(dev_gpio_port_mock_get_level(DEV_GPIO_LED_STATUS), (int)DEV_GPIO_LEVEL_LOW, "level LOW");
+    CHECK_EQ(dev_gpio_output_level(DEV_GPIO_LED_GREEN, DEV_GPIO_LEVEL_LOW), DEV_OK, "output_level");
+    CHECK_EQ(dev_gpio_port_mock_get_level(DEV_GPIO_LED_GREEN), (int)DEV_GPIO_LEVEL_LOW, "level LOW");
     printf("    PASS\n"); g_passes++;
 }
 
@@ -126,8 +126,8 @@ TEST(6_output_level_low)
 TEST(7_input)
 {
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_input(DEV_GPIO_BUTTON_USER), DEV_OK, "input");
-    CHECK(!dev_gpio_port_mock_is_output(DEV_GPIO_BUTTON_USER), "is input");
+    CHECK_EQ(dev_gpio_input(DEV_GPIO_LED_RED), DEV_OK, "input");
+    CHECK(!dev_gpio_port_mock_is_output(DEV_GPIO_LED_RED), "is input");
     printf("    PASS\n"); g_passes++;
 }
 
@@ -135,7 +135,7 @@ TEST(7_input)
 TEST(8_input_pullup)
 {
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_input_pullup(DEV_GPIO_BUTTON_USER), DEV_OK, "input_pullup");
+    CHECK_EQ(dev_gpio_input_pullup(DEV_GPIO_LED_RED), DEV_OK, "input_pullup");
     printf("    PASS\n"); g_passes++;
 }
 
@@ -143,7 +143,7 @@ TEST(8_input_pullup)
 TEST(9_input_pulldown)
 {
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_input_pulldown(DEV_GPIO_BUTTON_USER), DEV_OK, "input_pulldown");
+    CHECK_EQ(dev_gpio_input_pulldown(DEV_GPIO_LED_RED), DEV_OK, "input_pulldown");
     printf("    PASS\n"); g_passes++;
 }
 
@@ -151,9 +151,9 @@ TEST(9_input_pulldown)
 TEST(10_write_valid)
 {
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_output(DEV_GPIO_LED_STATUS), DEV_OK, "output");
-    CHECK_EQ(dev_gpio_write(DEV_GPIO_LED_STATUS, DEV_GPIO_LEVEL_HIGH), DEV_OK, "write");
-    CHECK_EQ(dev_gpio_port_mock_get_level(DEV_GPIO_LED_STATUS), (int)DEV_GPIO_LEVEL_HIGH, "level");
+    CHECK_EQ(dev_gpio_output(DEV_GPIO_LED_GREEN), DEV_OK, "output");
+    CHECK_EQ(dev_gpio_write(DEV_GPIO_LED_GREEN, DEV_GPIO_LEVEL_HIGH), DEV_OK, "write");
+    CHECK_EQ(dev_gpio_port_mock_get_level(DEV_GPIO_LED_GREEN), (int)DEV_GPIO_LEVEL_HIGH, "level");
     printf("    PASS\n"); g_passes++;
 }
 
@@ -161,8 +161,8 @@ TEST(10_write_valid)
 TEST(11_write_invalid_level)
 {
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_output(DEV_GPIO_LED_STATUS), DEV_OK, "output");
-    CHECK_EQ(dev_gpio_write(DEV_GPIO_LED_STATUS, (dev_gpio_level_t)99U), DEV_ERR_INVALID_ARG, "invalid level");
+    CHECK_EQ(dev_gpio_output(DEV_GPIO_LED_GREEN), DEV_OK, "output");
+    CHECK_EQ(dev_gpio_write(DEV_GPIO_LED_GREEN, (dev_gpio_level_t)99U), DEV_ERR_INVALID_ARG, "invalid level");
     printf("    PASS\n"); g_passes++;
 }
 
@@ -170,8 +170,8 @@ TEST(11_write_invalid_level)
 TEST(12_read_null)
 {
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_output(DEV_GPIO_LED_STATUS), DEV_OK, "output");
-    CHECK_EQ(dev_gpio_read(DEV_GPIO_LED_STATUS, NULL), DEV_ERR_NULL_PTR, "null ptr");
+    CHECK_EQ(dev_gpio_output(DEV_GPIO_LED_GREEN), DEV_OK, "output");
+    CHECK_EQ(dev_gpio_read(DEV_GPIO_LED_GREEN, NULL), DEV_ERR_NULL_PTR, "null ptr");
     printf("    PASS\n"); g_passes++;
 }
 
@@ -180,8 +180,8 @@ TEST(13_read_valid)
 {
     dev_gpio_level_t lvl;
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_output_level(DEV_GPIO_LED_STATUS, DEV_GPIO_LEVEL_HIGH), DEV_OK, "output_level");
-    CHECK_EQ(dev_gpio_read(DEV_GPIO_LED_STATUS, &lvl), DEV_OK, "read");
+    CHECK_EQ(dev_gpio_output_level(DEV_GPIO_LED_GREEN, DEV_GPIO_LEVEL_HIGH), DEV_OK, "output_level");
+    CHECK_EQ(dev_gpio_read(DEV_GPIO_LED_GREEN, &lvl), DEV_OK, "read");
     CHECK_EQ(lvl, DEV_GPIO_LEVEL_HIGH, "level");
     printf("    PASS\n"); g_passes++;
 }
@@ -191,9 +191,9 @@ TEST(14_toggle)
 {
     dev_gpio_level_t lvl;
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_output(DEV_GPIO_LED_STATUS), DEV_OK, "output");
-    CHECK_EQ(dev_gpio_toggle(DEV_GPIO_LED_STATUS), DEV_OK, "toggle");
-    CHECK_EQ(dev_gpio_read(DEV_GPIO_LED_STATUS, &lvl), DEV_OK, "read");
+    CHECK_EQ(dev_gpio_output(DEV_GPIO_LED_GREEN), DEV_OK, "output");
+    CHECK_EQ(dev_gpio_toggle(DEV_GPIO_LED_GREEN), DEV_OK, "toggle");
+    CHECK_EQ(dev_gpio_read(DEV_GPIO_LED_GREEN, &lvl), DEV_OK, "read");
     CHECK_EQ(lvl, DEV_GPIO_LEVEL_HIGH, "HIGH after toggle from LOW");
     printf("    PASS\n"); g_passes++;
 }
@@ -202,8 +202,8 @@ TEST(14_toggle)
 TEST(15_set_pull)
 {
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_input(DEV_GPIO_BUTTON_USER), DEV_OK, "input");
-    CHECK_EQ(dev_gpio_set_pull(DEV_GPIO_BUTTON_USER, DEV_GPIO_PULL_UP), DEV_OK, "set_pull UP");
+    CHECK_EQ(dev_gpio_input(DEV_GPIO_LED_RED), DEV_OK, "input");
+    CHECK_EQ(dev_gpio_set_pull(DEV_GPIO_LED_RED, DEV_GPIO_PULL_UP), DEV_OK, "set_pull UP");
     printf("    PASS\n"); g_passes++;
 }
 
@@ -211,9 +211,9 @@ TEST(15_set_pull)
 TEST(16_high)
 {
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_output(DEV_GPIO_LED_STATUS), DEV_OK, "output");
-    CHECK_EQ(dev_gpio_high(DEV_GPIO_LED_STATUS), DEV_OK, "high");
-    CHECK_EQ(dev_gpio_port_mock_get_level(DEV_GPIO_LED_STATUS), (int)DEV_GPIO_LEVEL_HIGH, "HIGH");
+    CHECK_EQ(dev_gpio_output(DEV_GPIO_LED_GREEN), DEV_OK, "output");
+    CHECK_EQ(dev_gpio_high(DEV_GPIO_LED_GREEN), DEV_OK, "high");
+    CHECK_EQ(dev_gpio_port_mock_get_level(DEV_GPIO_LED_GREEN), (int)DEV_GPIO_LEVEL_HIGH, "HIGH");
     printf("    PASS\n"); g_passes++;
 }
 
@@ -221,9 +221,9 @@ TEST(16_high)
 TEST(17_low)
 {
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_output_level(DEV_GPIO_LED_STATUS, DEV_GPIO_LEVEL_HIGH), DEV_OK, "out_lvl");
-    CHECK_EQ(dev_gpio_low(DEV_GPIO_LED_STATUS), DEV_OK, "low");
-    CHECK_EQ(dev_gpio_port_mock_get_level(DEV_GPIO_LED_STATUS), (int)DEV_GPIO_LEVEL_LOW, "LOW");
+    CHECK_EQ(dev_gpio_output_level(DEV_GPIO_LED_GREEN, DEV_GPIO_LEVEL_HIGH), DEV_OK, "out_lvl");
+    CHECK_EQ(dev_gpio_low(DEV_GPIO_LED_GREEN), DEV_OK, "low");
+    CHECK_EQ(dev_gpio_port_mock_get_level(DEV_GPIO_LED_GREEN), (int)DEV_GPIO_LEVEL_LOW, "LOW");
     printf("    PASS\n"); g_passes++;
 }
 
@@ -232,8 +232,8 @@ TEST(18_interrupt_register)
 {
     reset_isr_state();
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_input(DEV_GPIO_BUTTON_USER), DEV_OK, "input");
-    CHECK_EQ(dev_gpio_interrupt(DEV_GPIO_BUTTON_USER, DEV_GPIO_INTR_RISING_EDGE,
+    CHECK_EQ(dev_gpio_input(DEV_GPIO_LED_RED), DEV_OK, "input");
+    CHECK_EQ(dev_gpio_interrupt(DEV_GPIO_LED_RED, DEV_GPIO_INTR_RISING_EDGE,
                                 test_isr_callback, (void*)0x42U), DEV_OK, "interrupt");
     printf("    PASS\n"); g_passes++;
 }
@@ -243,10 +243,10 @@ TEST(19_interrupt_clear)
 {
     reset_isr_state();
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_input(DEV_GPIO_BUTTON_USER), DEV_OK, "input");
-    CHECK_EQ(dev_gpio_interrupt(DEV_GPIO_BUTTON_USER, DEV_GPIO_INTR_RISING_EDGE,
+    CHECK_EQ(dev_gpio_input(DEV_GPIO_LED_RED), DEV_OK, "input");
+    CHECK_EQ(dev_gpio_interrupt(DEV_GPIO_LED_RED, DEV_GPIO_INTR_RISING_EDGE,
                                 test_isr_callback, NULL), DEV_OK, "register");
-    CHECK_EQ(dev_gpio_interrupt(DEV_GPIO_BUTTON_USER, DEV_GPIO_INTR_DISABLE,
+    CHECK_EQ(dev_gpio_interrupt(DEV_GPIO_LED_RED, DEV_GPIO_INTR_DISABLE,
                                 NULL, NULL), DEV_OK, "clear");
     printf("    PASS\n"); g_passes++;
 }
@@ -255,8 +255,8 @@ TEST(19_interrupt_clear)
 TEST(20_interrupt_null_cb_error)
 {
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_input(DEV_GPIO_BUTTON_USER), DEV_OK, "input");
-    CHECK_EQ(dev_gpio_interrupt(DEV_GPIO_BUTTON_USER, DEV_GPIO_INTR_RISING_EDGE,
+    CHECK_EQ(dev_gpio_input(DEV_GPIO_LED_RED), DEV_OK, "input");
+    CHECK_EQ(dev_gpio_interrupt(DEV_GPIO_LED_RED, DEV_GPIO_INTR_RISING_EDGE,
                                 NULL, NULL), DEV_ERR_NULL_PTR, "null cb");
     printf("    PASS\n"); g_passes++;
 }
@@ -266,14 +266,14 @@ TEST(21_interrupt_enable_trigger)
 {
     reset_isr_state();
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_input(DEV_GPIO_BUTTON_USER), DEV_OK, "input");
-    CHECK_EQ(dev_gpio_interrupt(DEV_GPIO_BUTTON_USER, DEV_GPIO_INTR_RISING_EDGE,
+    CHECK_EQ(dev_gpio_input(DEV_GPIO_LED_RED), DEV_OK, "input");
+    CHECK_EQ(dev_gpio_interrupt(DEV_GPIO_LED_RED, DEV_GPIO_INTR_RISING_EDGE,
                                 test_isr_callback, (void*)0xDEADU), DEV_OK, "register");
-    CHECK_EQ(dev_gpio_interrupt_enable(DEV_GPIO_BUTTON_USER), DEV_OK, "enable");
+    CHECK_EQ(dev_gpio_interrupt_enable(DEV_GPIO_LED_RED), DEV_OK, "enable");
 
-    dev_gpio_port_mock_trigger_isr(DEV_GPIO_BUTTON_USER);
+    dev_gpio_port_mock_trigger_isr(DEV_GPIO_LED_RED);
     CHECK_EQ(g_isr_call_count, 1, "call count");
-    CHECK_EQ(g_last_isr_pin, DEV_GPIO_BUTTON_USER, "correct pin");
+    CHECK_EQ(g_last_isr_pin, DEV_GPIO_LED_RED, "correct pin");
     CHECK_EQ_PTR(g_last_isr_arg, (void*)0xDEADU, "correct arg");
     printf("    PASS\n"); g_passes++;
 }
@@ -283,14 +283,14 @@ TEST(22_interrupt_disable)
 {
     reset_isr_state();
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_input(DEV_GPIO_BUTTON_USER), DEV_OK, "input");
-    CHECK_EQ(dev_gpio_interrupt(DEV_GPIO_BUTTON_USER, DEV_GPIO_INTR_RISING_EDGE,
+    CHECK_EQ(dev_gpio_input(DEV_GPIO_LED_RED), DEV_OK, "input");
+    CHECK_EQ(dev_gpio_interrupt(DEV_GPIO_LED_RED, DEV_GPIO_INTR_RISING_EDGE,
                                 test_isr_callback, NULL), DEV_OK, "register");
-    CHECK_EQ(dev_gpio_interrupt_enable(DEV_GPIO_BUTTON_USER), DEV_OK, "enable");
-    CHECK_EQ(dev_gpio_interrupt_disable(DEV_GPIO_BUTTON_USER), DEV_OK, "disable");
+    CHECK_EQ(dev_gpio_interrupt_enable(DEV_GPIO_LED_RED), DEV_OK, "enable");
+    CHECK_EQ(dev_gpio_interrupt_disable(DEV_GPIO_LED_RED), DEV_OK, "disable");
 
     g_isr_call_count = 0;
-    dev_gpio_port_mock_trigger_isr(DEV_GPIO_BUTTON_USER);
+    dev_gpio_port_mock_trigger_isr(DEV_GPIO_LED_RED);
     CHECK_EQ(g_isr_call_count, 0, "NOT called when disabled");
     printf("    PASS\n"); g_passes++;
 }
@@ -326,7 +326,7 @@ TEST(25_pin_out_of_range)
 /* ── Test 26 ── */
 TEST(26_before_init)
 {
-    CHECK_EQ(dev_gpio_output(DEV_GPIO_LED_STATUS), DEV_ERR_NOT_INITIALIZED, "not init");
+    CHECK_EQ(dev_gpio_output(DEV_GPIO_LED_GREEN), DEV_ERR_NOT_INITIALIZED, "not init");
     printf("    PASS\n"); g_passes++;
 }
 
@@ -334,10 +334,10 @@ TEST(26_before_init)
 TEST(27_error_injection)
 {
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_output(DEV_GPIO_LED_STATUS), DEV_OK, "output");
+    CHECK_EQ(dev_gpio_output(DEV_GPIO_LED_GREEN), DEV_OK, "output");
 
     dev_gpio_port_mock_set_error(DEV_ERR_HW_FAILURE);
-    CHECK_EQ(dev_gpio_write(DEV_GPIO_LED_STATUS, DEV_GPIO_LEVEL_HIGH),
+    CHECK_EQ(dev_gpio_write(DEV_GPIO_LED_GREEN, DEV_GPIO_LEVEL_HIGH),
              DEV_ERR_HW_FAILURE, "injected error");
     printf("    PASS\n"); g_passes++;
 }
@@ -347,16 +347,16 @@ TEST(28_enable_rollback)
 {
     reset_isr_state();
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_input(DEV_GPIO_BUTTON_USER), DEV_OK, "input");
-    CHECK_EQ(dev_gpio_interrupt(DEV_GPIO_BUTTON_USER, DEV_GPIO_INTR_RISING_EDGE,
+    CHECK_EQ(dev_gpio_input(DEV_GPIO_LED_RED), DEV_OK, "input");
+    CHECK_EQ(dev_gpio_interrupt(DEV_GPIO_LED_RED, DEV_GPIO_INTR_RISING_EDGE,
                                 test_isr_callback, NULL), DEV_OK, "register");
 
     dev_gpio_port_mock_set_error(DEV_ERR_HW_FAILURE);
-    CHECK_EQ(dev_gpio_interrupt_enable(DEV_GPIO_BUTTON_USER),
+    CHECK_EQ(dev_gpio_interrupt_enable(DEV_GPIO_LED_RED),
              DEV_ERR_HW_FAILURE, "enable fails");
 
     g_isr_call_count = 0;
-    dev_gpio_port_mock_trigger_isr(DEV_GPIO_BUTTON_USER);
+    dev_gpio_port_mock_trigger_isr(DEV_GPIO_LED_RED);
     CHECK_EQ(g_isr_call_count, 0, "NOT called after rollback");
     printf("    PASS\n"); g_passes++;
 }
@@ -365,10 +365,10 @@ TEST(28_enable_rollback)
 TEST(29_interrupt_disabled_build)
 {
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_input(DEV_GPIO_BUTTON_USER), DEV_OK, "input");
+    CHECK_EQ(dev_gpio_input(DEV_GPIO_LED_RED), DEV_OK, "input");
 
 #if (DEV_GPIO_CFG_INTERRUPT_ENABLED == 0U)
-    CHECK_EQ(dev_gpio_interrupt(DEV_GPIO_BUTTON_USER, DEV_GPIO_INTR_RISING_EDGE,
+    CHECK_EQ(dev_gpio_interrupt(DEV_GPIO_LED_RED, DEV_GPIO_INTR_RISING_EDGE,
                                 test_isr_callback, NULL),
              DEV_ERR_NOT_SUPPORTED, "interrupt disabled build");
 #endif
@@ -381,9 +381,9 @@ TEST(30_enable_disable_disabled_build)
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
 
 #if (DEV_GPIO_CFG_INTERRUPT_ENABLED == 0U)
-    CHECK_EQ(dev_gpio_interrupt_enable(DEV_GPIO_BUTTON_USER),
+    CHECK_EQ(dev_gpio_interrupt_enable(DEV_GPIO_LED_RED),
              DEV_ERR_NOT_SUPPORTED, "enable disabled build");
-    CHECK_EQ(dev_gpio_interrupt_disable(DEV_GPIO_BUTTON_USER),
+    CHECK_EQ(dev_gpio_interrupt_disable(DEV_GPIO_LED_RED),
              DEV_ERR_NOT_SUPPORTED, "disable disabled build");
 #endif
     printf("    PASS\n"); g_passes++;
@@ -404,18 +404,18 @@ TEST(32_deinit_clears_callbacks)
 {
     reset_isr_state();
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_input(DEV_GPIO_BUTTON_USER), DEV_OK, "input");
-    CHECK_EQ(dev_gpio_interrupt(DEV_GPIO_BUTTON_USER, DEV_GPIO_INTR_RISING_EDGE,
+    CHECK_EQ(dev_gpio_input(DEV_GPIO_LED_RED), DEV_OK, "input");
+    CHECK_EQ(dev_gpio_interrupt(DEV_GPIO_LED_RED, DEV_GPIO_INTR_RISING_EDGE,
                                 test_isr_callback, NULL), DEV_OK, "register");
-    CHECK_EQ(dev_gpio_interrupt_enable(DEV_GPIO_BUTTON_USER), DEV_OK, "enable");
+    CHECK_EQ(dev_gpio_interrupt_enable(DEV_GPIO_LED_RED), DEV_OK, "enable");
 
     CHECK_EQ(dev_gpio_deinit(), DEV_OK, "deinit");
     CHECK_EQ(dev_gpio_init(), DEV_OK, "reinit");
 
     g_isr_call_count = 0;
-    dev_gpio_port_mock_trigger_isr(DEV_GPIO_BUTTON_USER);
+    dev_gpio_port_mock_trigger_isr(DEV_GPIO_LED_RED);
     CHECK_EQ(g_isr_call_count, 0, "callback NOT invoked after reinit");
-    CHECK_EQ(dev_gpio_interrupt_enable(DEV_GPIO_BUTTON_USER),
+    CHECK_EQ(dev_gpio_interrupt_enable(DEV_GPIO_LED_RED),
              DEV_ERR_INVALID_STATE, "enable fails without callback");
     printf("    PASS\n"); g_passes++;
 }
@@ -424,8 +424,8 @@ TEST(32_deinit_clears_callbacks)
 TEST(33_enable_without_callback)
 {
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_input(DEV_GPIO_BUTTON_USER), DEV_OK, "input");
-    CHECK_EQ(dev_gpio_interrupt_enable(DEV_GPIO_BUTTON_USER),
+    CHECK_EQ(dev_gpio_input(DEV_GPIO_LED_RED), DEV_OK, "input");
+    CHECK_EQ(dev_gpio_interrupt_enable(DEV_GPIO_LED_RED),
              DEV_ERR_INVALID_STATE, "enable without callback");
     printf("    PASS\n"); g_passes++;
 }
@@ -435,16 +435,16 @@ TEST(34_disable_fail_blocks_enable)
 {
     reset_isr_state();
     CHECK_EQ(dev_gpio_init(), DEV_OK, "init");
-    CHECK_EQ(dev_gpio_input(DEV_GPIO_BUTTON_USER), DEV_OK, "input");
-    CHECK_EQ(dev_gpio_interrupt(DEV_GPIO_BUTTON_USER, DEV_GPIO_INTR_RISING_EDGE,
+    CHECK_EQ(dev_gpio_input(DEV_GPIO_LED_RED), DEV_OK, "input");
+    CHECK_EQ(dev_gpio_interrupt(DEV_GPIO_LED_RED, DEV_GPIO_INTR_RISING_EDGE,
                                 test_isr_callback, NULL), DEV_OK, "register");
 
     dev_gpio_port_mock_set_error(DEV_ERR_HW_FAILURE);
-    CHECK_EQ(dev_gpio_interrupt(DEV_GPIO_BUTTON_USER, DEV_GPIO_INTR_DISABLE, NULL, NULL),
+    CHECK_EQ(dev_gpio_interrupt(DEV_GPIO_LED_RED, DEV_GPIO_INTR_DISABLE, NULL, NULL),
              DEV_ERR_HW_FAILURE, "disable fails");
     dev_gpio_port_mock_clear_error();
 
-    CHECK_EQ(dev_gpio_interrupt_enable(DEV_GPIO_BUTTON_USER),
+    CHECK_EQ(dev_gpio_interrupt_enable(DEV_GPIO_LED_RED),
              DEV_ERR_INVALID_STATE, "enable blocked after failed disable");
     printf("    PASS\n"); g_passes++;
 }

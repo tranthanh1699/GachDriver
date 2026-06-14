@@ -43,6 +43,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 )
 
 # ── Driver modules (each owns its own CMakeLists.txt) ──
+set(DEV_GPIO_PORT "stm32" CACHE STRING "GPIO port: mock, stm32")
 add_subdirectory(drivers/dev_common)
 add_subdirectory(drivers/dev_gpio)
 
