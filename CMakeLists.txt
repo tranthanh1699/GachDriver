@@ -58,6 +58,10 @@ if(DEV_GPIO_PORT STREQUAL "stm32")
         ${CMAKE_SOURCE_DIR}/Drivers/CMSIS/Include
         ${CMAKE_SOURCE_DIR}/Core/Inc
     )
+    target_compile_definitions(dev_gpio PRIVATE
+        STM32H743xx
+        USE_HAL_DRIVER
+    )
 endif()
 
 # Link driver libraries to the executable
