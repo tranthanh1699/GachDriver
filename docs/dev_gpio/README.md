@@ -280,11 +280,127 @@ if (dev_gpio_read(DEV_GPIO_DIP_SW_1) == DEV_GPIO_LEVEL_LOW) {
 }
 ```
 
+### 6.5 Button interrupt — LED toggle on press
+
+```c
+#include "dev_gpio.h"
+
+static void button_isr(dev_gpio_pin_t pin, void *user_arg)
+{
+    (void)user_arg;
+    dev_gpio_toggle(DEV_GPIO_LED_STATUS);
+}
+
+int main(void)
+{
+    dev_gpio_init();
+
+    /* Enable interrupt on BUTTON_USER */
+    dev_gpio_interrupt_enable(DEV_GPIO_BUTTON_USER,
+                              DEV_GPIO_INTR_FALLING_EDGE,
+                              button_isr,
+                              NULL);
+
+    for (;;) {
+        /* main loop — ISR handles the LED */
+    }
+}
+```
+
+### 6.6 Wiring the EXTI callback
+
+In your STM32 project (`Core/Src/stm32h7xx_it.c`), add one line to route EXTI interrupts to `dev_gpio`:
+
+```c
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    dev_gpio_dispatch_isr(GPIO_Pin);
+}
+```
+
+This is the **only** place vendor ISR code touches `dev_gpio`. The driver handles callback lookup and invocation.
+
+### 6.7 Multiple interrupt pins
+
+```c
+static void btn_isr(dev_gpio_pin_t pin, void *arg) { /* ... */ }
+static void sensor_isr(dev_gpio_pin_t pin, void *arg) { /* ... */ }
+
+dev_gpio_init();
+
+dev_gpio_interrupt_enable(DEV_GPIO_BUTTON_USER,
+                          DEV_GPIO_INTR_FALLING_EDGE, btn_isr, NULL);
+
+dev_gpio_interrupt_enable(DEV_GPIO_SENSOR_INT,
+                          DEV_GPIO_INTR_RISING_EDGE, sensor_isr, NULL);
+```
+
 ---
 
-## 7. Porting to New Hardware
+## 7. Interrupt API Reference
 
-### 7.1 Overview
+### 7.1 dev_gpio_interrupt_enable
+
+```c
+dev_err_t dev_gpio_interrupt_enable(dev_gpio_pin_t      pin,
+                                    dev_gpio_intr_t     intr,
+                                    dev_gpio_callback_t callback,
+                                    void               *user_arg);
+```
+
+Configures EXTI interrupt mode, registers the callback, and enables NVIC.
+
+| Parameter | Description |
+|-----------|-------------|
+| `pin` | Logical pin ID |
+| `intr` | `DEV_GPIO_INTR_RISING_EDGE`, `DEV_GPIO_INTR_FALLING_EDGE`, or `DEV_GPIO_INTR_BOTH_EDGES` |
+| `callback` | ISR handler (must not be NULL) |
+| `user_arg` | Passed to callback (may be NULL) |
+
+| Return | Meaning |
+|--------|---------|
+| `DEV_OK` | Interrupt enabled |
+| `DEV_ERR_NULL_PTR` | callback is NULL |
+| `DEV_ERR_NOT_INITIALIZED` | dev_gpio_init() not called |
+| `DEV_ERR_INVALID_ARG` | pin out of range |
+| `DEV_ERR_NOT_SUPPORTED` | pin number has no mapped EXTI IRQ |
+
+### 7.2 dev_gpio_interrupt_disable
+
+```c
+dev_err_t dev_gpio_interrupt_disable(dev_gpio_pin_t pin);
+```
+
+Disables NVIC, restores pin to regular input mode, clears callback.
+
+### 7.3 dev_gpio_dispatch_isr
+
+```c
+void dev_gpio_dispatch_isr(uint16_t hal_pin);
+```
+
+Called from `HAL_GPIO_EXTI_Callback`. Maps STM32 pin mask → logical pin ID, invokes registered callback. **PORT-ONLY** — do not call from application code.
+
+### 7.4 Interrupt Types
+
+| Constant | EXTI Mode |
+|----------|-----------|
+| `DEV_GPIO_INTR_RISING_EDGE` | `GPIO_MODE_IT_RISING` |
+| `DEV_GPIO_INTR_FALLING_EDGE` | `GPIO_MODE_IT_FALLING` |
+| `DEV_GPIO_INTR_BOTH_EDGES` | `GPIO_MODE_IT_RISING_FALLING` |
+
+### 7.5 Callback Rules
+
+- Callback runs in **ISR context** — must not block, must not call non-ISR-safe APIs
+- Callback receives `(dev_gpio_pin_t pin, void *user_arg)`
+- Callback table is static, sized to `DEV_GPIO_CFG_MAX_PINS`
+- Only pins configured as input (INPUT, INPUT_PULLUP, INPUT_PULLDOWN) should enable interrupts
+
+---
+
+## 8. Porting to New Hardware
+
+### 8.1 Overview
 
 Porting `dev_gpio` to a new MCU requires changing **2 files**:
 
@@ -295,7 +411,7 @@ Porting `dev_gpio` to a new MCU requires changing **2 files**:
 
 The X-Macro mechanism (`DEV_GPIO_PIN_LIST`, `dev_gpio_get_hw_map`, `dev_gpio_get_pin_count`, `dev_gpio_logical_pin_id_t`) stays identical — only the hardware access layer changes.
 
-### 7.2 STM32 → ESP32 Example
+### 8.2 STM32 → ESP32 Example
 
 **Step 1: `dev_gpio_cfg.h`**
 
@@ -386,7 +502,7 @@ dev_err_t dev_gpio_toggle(dev_gpio_pin_t pin)
 }
 ```
 
-### 7.3 Porting Checklist
+### 8.3 Porting Checklist
 
 | # | Step |
 |---|------|
@@ -400,7 +516,7 @@ dev_err_t dev_gpio_toggle(dev_gpio_pin_t pin)
 
 ---
 
-## 8. Types Reference — `dev_gpio_types.h`
+## 9. Types Reference — `dev_gpio_types.h`
 
 ```c
 typedef uint16_t dev_gpio_pin_t;        // Logical pin ID
@@ -426,7 +542,7 @@ typedef enum {
 
 ---
 
-## 9. File Reference
+## 10. File Reference
 
 | File | Role |
 |------|------|
@@ -438,7 +554,7 @@ typedef enum {
 
 ---
 
-## 10. Build Integration
+## 11. Build Integration
 
 ```cmake
 # CMakeLists.txt
