@@ -87,6 +87,13 @@ void dev_assert_report(const char *file,
         }                                                             \
     } while (false)
 
+#define DEV_RETURN_ON_FALSE(condition, error_code)       \
+    do {                                                  \
+        if (!(condition)) {                               \
+            return (error_code);                           \
+        }                                                  \
+    } while (false)
+
 #ifdef __cplusplus
 }
 #endif

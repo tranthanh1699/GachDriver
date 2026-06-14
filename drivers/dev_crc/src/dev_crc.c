@@ -6,7 +6,7 @@
 
 dev_err_t dev_crc8_init(dev_crc8_ctx_t *ctx)
 {
-    DEV_CHECK_RET((ctx != NULL), DEV_ERR_NULL_PTR);
+    DEV_RETURN_ON_FALSE(ctx != NULL, DEV_ERR_NULL_PTR);
     ctx->value = 0x00U;
     return DEV_OK;
 }
@@ -18,7 +18,7 @@ dev_err_t dev_crc8_update(dev_crc8_ctx_t *ctx, const uint8_t *data, size_t len)
     uint8_t bit;
 
     DEV_CHECK_RET((ctx != NULL),  DEV_ERR_NULL_PTR);
-    DEV_CHECK_RET((data != NULL), DEV_ERR_NULL_PTR);
+    DEV_RETURN_ON_FALSE(data != NULL, DEV_ERR_NULL_PTR);
 
     crc = ctx->value;
 
@@ -40,7 +40,7 @@ dev_err_t dev_crc8_update(dev_crc8_ctx_t *ctx, const uint8_t *data, size_t len)
 dev_err_t dev_crc8_final(const dev_crc8_ctx_t *ctx, uint8_t *out_crc)
 {
     DEV_CHECK_RET((ctx != NULL),     DEV_ERR_NULL_PTR);
-    DEV_CHECK_RET((out_crc != NULL), DEV_ERR_NULL_PTR);
+    DEV_RETURN_ON_FALSE(out_crc != NULL, DEV_ERR_NULL_PTR);
 
     *out_crc = ctx->value;
     return DEV_OK;
@@ -65,7 +65,7 @@ dev_err_t dev_crc8_compute(const uint8_t *data, size_t len, uint8_t *out_crc)
 
 dev_err_t dev_crc16_init(dev_crc16_ctx_t *ctx)
 {
-    DEV_CHECK_RET((ctx != NULL), DEV_ERR_NULL_PTR);
+    DEV_RETURN_ON_FALSE(ctx != NULL, DEV_ERR_NULL_PTR);
     ctx->value = 0xFFFFU;
     return DEV_OK;
 }
@@ -77,7 +77,7 @@ dev_err_t dev_crc16_update(dev_crc16_ctx_t *ctx, const uint8_t *data, size_t len
     uint8_t  bit;
 
     DEV_CHECK_RET((ctx != NULL),  DEV_ERR_NULL_PTR);
-    DEV_CHECK_RET((data != NULL), DEV_ERR_NULL_PTR);
+    DEV_RETURN_ON_FALSE(data != NULL, DEV_ERR_NULL_PTR);
 
     crc = ctx->value;
 
@@ -99,7 +99,7 @@ dev_err_t dev_crc16_update(dev_crc16_ctx_t *ctx, const uint8_t *data, size_t len
 dev_err_t dev_crc16_final(const dev_crc16_ctx_t *ctx, uint16_t *out_crc)
 {
     DEV_CHECK_RET((ctx != NULL),     DEV_ERR_NULL_PTR);
-    DEV_CHECK_RET((out_crc != NULL), DEV_ERR_NULL_PTR);
+    DEV_RETURN_ON_FALSE(out_crc != NULL, DEV_ERR_NULL_PTR);
 
     *out_crc = ctx->value;
     return DEV_OK;
@@ -124,7 +124,7 @@ dev_err_t dev_crc16_compute(const uint8_t *data, size_t len, uint16_t *out_crc)
 
 dev_err_t dev_crc32_init(dev_crc32_ctx_t *ctx)
 {
-    DEV_CHECK_RET((ctx != NULL), DEV_ERR_NULL_PTR);
+    DEV_RETURN_ON_FALSE(ctx != NULL, DEV_ERR_NULL_PTR);
     ctx->value = 0xFFFFFFFFUL;
     return DEV_OK;
 }
@@ -136,7 +136,7 @@ dev_err_t dev_crc32_update(dev_crc32_ctx_t *ctx, const uint8_t *data, size_t len
     uint8_t  bit;
 
     DEV_CHECK_RET((ctx != NULL),  DEV_ERR_NULL_PTR);
-    DEV_CHECK_RET((data != NULL), DEV_ERR_NULL_PTR);
+    DEV_RETURN_ON_FALSE(data != NULL, DEV_ERR_NULL_PTR);
 
     crc = ctx->value;
 
@@ -158,7 +158,7 @@ dev_err_t dev_crc32_update(dev_crc32_ctx_t *ctx, const uint8_t *data, size_t len
 dev_err_t dev_crc32_final(const dev_crc32_ctx_t *ctx, uint32_t *out_crc)
 {
     DEV_CHECK_RET((ctx != NULL),     DEV_ERR_NULL_PTR);
-    DEV_CHECK_RET((out_crc != NULL), DEV_ERR_NULL_PTR);
+    DEV_RETURN_ON_FALSE(out_crc != NULL, DEV_ERR_NULL_PTR);
 
     *out_crc = ctx->value ^ 0xFFFFFFFFUL;
     return DEV_OK;
