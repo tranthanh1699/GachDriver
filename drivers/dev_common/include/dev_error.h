@@ -22,7 +22,9 @@ typedef enum {
     DEV_ERR_HW_FAILURE,
     DEV_ERR_CONFIG,
     DEV_ERR_NO_ACK,
-    DEV_ERR_BUS
+    DEV_ERR_BUS,
+    DEV_ERR_OVERFLOW,
+    DEV_ERR_EMPTY
 } dev_err_t;
 
 #ifdef __cplusplus

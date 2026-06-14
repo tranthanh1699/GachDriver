@@ -22,6 +22,8 @@ Application → dev_* public API → common implementation → port interface �
 | `dev_i2c` | I2C wrapper (logical bus, 7-bit addr) | [docs/dev_i2c/README.md](docs/dev_i2c/README.md) |
 | `dev_crc` | CRC-8/16/32 computation | [docs/dev_crc/README.md](docs/dev_crc/README.md) |
 | `dev_list` | Fixed-capacity singly-linked list | [docs/dev_list/README.md](docs/dev_list/README.md) |
+| `dev_ringbuf` | SPSC byte ring buffer | [docs/dev_ringbuf/README.md](docs/dev_ringbuf/README.md) |
+| `dev_uart` | UART wrapper (logical ID, RX buffering) | [docs/dev_uart/README.md](docs/dev_uart/README.md) |
 
 ## Quick Start
 
@@ -62,6 +64,7 @@ drivers/
   dev_i2c/        I2C driver
   dev_crc/        CRC computation
   dev_list/       Linked list container
+  dev_ringbuf/    SPSC byte ring buffer
 tests/
   dev_gpio/       34 host tests
   dev_i2c/        24 host tests

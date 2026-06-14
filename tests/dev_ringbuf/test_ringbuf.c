@@ -58,7 +58,7 @@ TEST(11_wraparound) {
     uint8_t vals[7]; size_t n;
     CHECK_ERR(dev_ringbuf_read(&g_rb, vals, 7U, &n), DEV_OK, "read"); CHECK_EQ(n, 7U, "count");
     CHECK_EQ(vals[0], 13U, "v0"); CHECK_EQ(vals[1], 14U, "v1"); CHECK_EQ(vals[2], 15U, "v2");
-    CHECK_EQ(vals[3], 16U, "v3");
+    CHECK_EQ(vals[3], 16U, "v3"); CHECK_EQ(vals[4], 100U, "v4"); CHECK_EQ(vals[5], 101U, "v5"); CHECK_EQ(vals[6], 102U, "v6");
     printf("    PASS\n"); g_passes++;
 }
 
