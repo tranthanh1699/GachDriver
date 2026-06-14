@@ -49,6 +49,17 @@ set(DEV_GPIO_PORT "stm32" CACHE STRING "GPIO port target: mock, stm32, esp32, nr
 add_subdirectory(drivers/dev_common)
 add_subdirectory(drivers/dev_gpio)
 
+# Vendor-specific include paths (port layer only)
+if(DEV_GPIO_PORT STREQUAL "stm32")
+    target_include_directories(dev_gpio PRIVATE
+        ${CMAKE_SOURCE_DIR}/Drivers/STM32H7xx_HAL_Driver/Inc
+        ${CMAKE_SOURCE_DIR}/Drivers/STM32H7xx_HAL_Driver/Inc/Legacy
+        ${CMAKE_SOURCE_DIR}/Drivers/CMSIS/Device/ST/STM32H7xx/Include
+        ${CMAKE_SOURCE_DIR}/Drivers/CMSIS/Include
+        ${CMAKE_SOURCE_DIR}/Core/Inc
+    )
+endif()
+
 # Link driver libraries to the executable
 target_link_libraries(${CMAKE_PROJECT_NAME}
     dev_common
