@@ -115,12 +115,18 @@ dev_err_t dev_gpio_port_interrupt_enable(dev_gpio_pin_t pin)
 {
     IRQn_Type irq = stm32_irq(s_gpio_map[pin].hal_pin);
     if (irq == (IRQn_Type)0xFFU) return DEV_ERR_NOT_SUPPORTED;
-    HAL_NVIC_SetPriority(irq, 0x0FU, 0x0FU); HAL_NVIC_EnableIRQ(irq); return DEV_OK;
+    HAL_NVIC_SetPriority(irq, 0x0FU, 0x0FU); HAL_NVIC_EnableIRQ(irq); 
+    return DEV_OK;
 }
 dev_err_t dev_gpio_port_interrupt_disable(dev_gpio_pin_t pin)
 {
     IRQn_Type irq = stm32_irq(s_gpio_map[pin].hal_pin);
-    if (irq != (IRQn_Type)0xFFU) HAL_NVIC_DisableIRQ(irq); return DEV_OK;
+    if (irq != (IRQn_Type)0xFFU) 
+    {
+        HAL_NVIC_DisableIRQ(irq); 
+    }
+    
+    return DEV_OK;
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t hal_pin)

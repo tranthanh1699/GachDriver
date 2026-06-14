@@ -114,7 +114,7 @@ int main(void)
     /* USER CODE BEGIN 3 */
     dev_gpio_toggle(DEV_GPIO_LED_GREEN);
     dev_gpio_toggle(DEV_GPIO_LED_RED);
-    HAL_Delay(500);
+    HAL_Delay(100);
   }
   /* USER CODE END 3 */
 }
