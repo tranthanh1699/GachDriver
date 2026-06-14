@@ -5,7 +5,7 @@ static bool g_initialized = false;
 
 /* ── Clock helpers ── */
 
-static void DevGpio_Stm32EnablePortClock(GPIO_TypeDef *port)
+static void dev_gpio_stm32_enable_port_clock(GPIO_TypeDef *port)
 {
     if (port == GPIOA)
     {
@@ -33,7 +33,7 @@ static void DevGpio_Stm32EnablePortClock(GPIO_TypeDef *port)
     }
 }
 
-static void DevGpio_Stm32SetupPin(const dev_gpio_hw_pin_t *hw)
+static void dev_gpio_stm32_setup_pin(const dev_gpio_hw_pin_t *hw)
 {
     GPIO_InitTypeDef init = {0};
 
@@ -71,7 +71,7 @@ static void DevGpio_Stm32SetupPin(const dev_gpio_hw_pin_t *hw)
 
 /* ── Public API ── */
 
-dev_err_t DevGpio_Init(void)
+dev_err_t dev_gpio_init(void)
 {
     uint16_t i;
 
@@ -79,24 +79,24 @@ dev_err_t DevGpio_Init(void)
         return DEV_ERR_ALREADY_INITIALIZED;
     }
 
-    const dev_gpio_hw_pin_t *map   = DevGpio_GetHwMap();
-    uint16_t                  count = DevGpio_GetPinCount();
+    const dev_gpio_hw_pin_t *map   = dev_gpio_get_hw_map();
+    uint16_t                  count = dev_gpio_get_pin_count();
 
     /* Enable clocks for all used GPIO ports */
     for (i = 0U; i < count; i++) {
-        DevGpio_Stm32EnablePortClock(map[i].port);
+        dev_gpio_stm32_enable_port_clock(map[i].port);
     }
 
     /* Configure each pin */
     for (i = 0U; i < count; i++) {
-        DevGpio_Stm32SetupPin(&map[i]);
+        dev_gpio_stm32_setup_pin(&map[i]);
     }
 
     g_initialized = true;
     return DEV_OK;
 }
 
-dev_err_t DevGpio_Write(dev_gpio_pin_t pin, dev_gpio_level_t level)
+dev_err_t dev_gpio_write(dev_gpio_pin_t pin, dev_gpio_level_t level)
 {
     GPIO_PinState hal_level;
 
@@ -104,7 +104,7 @@ dev_err_t DevGpio_Write(dev_gpio_pin_t pin, dev_gpio_level_t level)
     if (!g_initialized) {
         return DEV_ERR_NOT_INITIALIZED;
     }
-    if (pin >= DevGpio_GetPinCount()) {
+    if (pin >= dev_gpio_get_pin_count()) {
         return DEV_ERR_INVALID_ARG;
     }
 #else
@@ -113,43 +113,43 @@ dev_err_t DevGpio_Write(dev_gpio_pin_t pin, dev_gpio_level_t level)
 
     hal_level = (level == DEV_GPIO_LEVEL_HIGH) ? GPIO_PIN_SET : GPIO_PIN_RESET;
 
-    HAL_GPIO_WritePin(DevGpio_GetHwMap()[pin].port,
-                      DevGpio_GetHwMap()[pin].pin,
+    HAL_GPIO_WritePin(dev_gpio_get_hw_map()[pin].port,
+                      dev_gpio_get_hw_map()[pin].pin,
                       hal_level);
 
     return DEV_OK;
 }
 
-dev_gpio_level_t DevGpio_Read(dev_gpio_pin_t pin)
+dev_gpio_level_t dev_gpio_read(dev_gpio_pin_t pin)
 {
 #if (DEV_GPIO_CFG_RUNTIME_CHECK_ENABLED == 1U)
     if (!g_initialized) {
         return DEV_GPIO_LEVEL_LOW;
     }
-    if (pin >= DevGpio_GetPinCount()) {
+    if (pin >= dev_gpio_get_pin_count()) {
         return DEV_GPIO_LEVEL_LOW;
     }
 #endif
 
-    GPIO_PinState state = HAL_GPIO_ReadPin(DevGpio_GetHwMap()[pin].port,
-                                           DevGpio_GetHwMap()[pin].pin);
+    GPIO_PinState state = HAL_GPIO_ReadPin(dev_gpio_get_hw_map()[pin].port,
+                                           dev_gpio_get_hw_map()[pin].pin);
 
     return (state == GPIO_PIN_SET) ? DEV_GPIO_LEVEL_HIGH : DEV_GPIO_LEVEL_LOW;
 }
 
-dev_err_t DevGpio_Toggle(dev_gpio_pin_t pin)
+dev_err_t dev_gpio_toggle(dev_gpio_pin_t pin)
 {
 #if (DEV_GPIO_CFG_RUNTIME_CHECK_ENABLED == 1U)
     if (!g_initialized) {
         return DEV_ERR_NOT_INITIALIZED;
     }
-    if (pin >= DevGpio_GetPinCount()) {
+    if (pin >= dev_gpio_get_pin_count()) {
         return DEV_ERR_INVALID_ARG;
     }
 #endif
 
-    HAL_GPIO_TogglePin(DevGpio_GetHwMap()[pin].port,
-                       DevGpio_GetHwMap()[pin].pin);
+    HAL_GPIO_TogglePin(dev_gpio_get_hw_map()[pin].port,
+                       dev_gpio_get_hw_map()[pin].pin);
 
     return DEV_OK;
 }

@@ -50,8 +50,8 @@ typedef struct {
 
 /* ── Map accessors (implemented in dev_gpio_cfg.c) ── */
 
-const dev_gpio_hw_pin_t * DevGpio_GetHwMap(void);
-uint16_t                  DevGpio_GetPinCount(void);
+const dev_gpio_hw_pin_t * dev_gpio_get_hw_map(void);
+uint16_t                  dev_gpio_get_pin_count(void);
 
 #ifdef __cplusplus
 }

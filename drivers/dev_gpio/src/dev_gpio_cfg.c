@@ -13,12 +13,12 @@ static const dev_gpio_hw_pin_t s_gpio_map[DEV_GPIO_CFG_PIN_COUNT] = {
 
 /* ── Accessors ── */
 
-const dev_gpio_hw_pin_t * DevGpio_GetHwMap(void)
+const dev_gpio_hw_pin_t * dev_gpio_get_hw_map(void)
 {
     return s_gpio_map;
 }
 
-uint16_t DevGpio_GetPinCount(void)
+uint16_t dev_gpio_get_pin_count(void)
 {
     return DEV_GPIO_CFG_PIN_COUNT;
 }

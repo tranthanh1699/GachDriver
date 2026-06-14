@@ -96,7 +96,7 @@ int main(void)
   {
       dev_err_t err;
 
-      err = DevGpio_Init();
+      err = dev_gpio_init();
       if (err != DEV_OK)
       {
           Error_Handler();
@@ -113,8 +113,8 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     {
-        (void)DevGpio_Toggle(DEV_GPIO_LED_STATUS);
-        (void)DevGpio_Toggle(DEV_GPIO_BUTTON_USER);
+        (void)dev_gpio_toggle(DEV_GPIO_LED_STATUS);
+        (void)dev_gpio_toggle(DEV_GPIO_BUTTON_USER);
 
         for (volatile uint32_t d = 0U; d < 5000000U; d++) { /* ~500ms */ }
     }

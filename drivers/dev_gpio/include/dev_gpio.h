@@ -20,7 +20,7 @@ extern "C" {
  *
  * @note Not reentrant. Not ISR-safe.
  */
-dev_err_t DevGpio_Init(void);
+dev_err_t dev_gpio_init(void);
 
 /**
  * @brief Write logic level to a logical pin.
@@ -29,10 +29,10 @@ dev_err_t DevGpio_Init(void);
  * @param level DEV_GPIO_LEVEL_LOW or DEV_GPIO_LEVEL_HIGH.
  *
  * @return DEV_OK on success.
- * @return DEV_ERR_NOT_INITIALIZED if DevGpio_Init() not called.
+ * @return DEV_ERR_NOT_INITIALIZED if dev_gpio_init() not called.
  * @return DEV_ERR_INVALID_ARG if pin >= DEV_GPIO_CFG_PIN_COUNT.
  */
-dev_err_t DevGpio_Write(dev_gpio_pin_t pin, dev_gpio_level_t level);
+dev_err_t dev_gpio_write(dev_gpio_pin_t pin, dev_gpio_level_t level);
 
 /**
  * @brief Read logic level from a logical pin.
@@ -42,7 +42,7 @@ dev_err_t DevGpio_Write(dev_gpio_pin_t pin, dev_gpio_level_t level);
  * @return DEV_GPIO_LEVEL_HIGH or DEV_GPIO_LEVEL_LOW.
  *         Returns DEV_GPIO_LEVEL_LOW if not initialized or invalid pin.
  */
-dev_gpio_level_t DevGpio_Read(dev_gpio_pin_t pin);
+dev_gpio_level_t dev_gpio_read(dev_gpio_pin_t pin);
 
 /**
  * @brief Toggle output level of a logical pin.
@@ -50,10 +50,10 @@ dev_gpio_level_t DevGpio_Read(dev_gpio_pin_t pin);
  * @param pin Logical pin ID.
  *
  * @return DEV_OK on success.
- * @return DEV_ERR_NOT_INITIALIZED if DevGpio_Init() not called.
+ * @return DEV_ERR_NOT_INITIALIZED if dev_gpio_init() not called.
  * @return DEV_ERR_INVALID_ARG if pin >= DEV_GPIO_CFG_PIN_COUNT.
  */
-dev_err_t DevGpio_Toggle(dev_gpio_pin_t pin);
+dev_err_t dev_gpio_toggle(dev_gpio_pin_t pin);
 
 #ifdef __cplusplus
 }
