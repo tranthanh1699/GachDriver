@@ -50,7 +50,10 @@ add_subdirectory(drivers/dev_common)
 add_subdirectory(drivers/dev_gpio)
 
 # Link driver libraries to the executable
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE dev_common dev_gpio)
+target_link_libraries(${CMAKE_PROJECT_NAME}
+    dev_common
+    dev_gpio
+)
 
 # Add project symbols (macros)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
