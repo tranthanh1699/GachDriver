@@ -52,7 +52,7 @@ dev_err_t dev_shell_init(dev_uart_id_t uart_id)
     g_state.initialized = true;
 
 #if (DEV_SHELL_CFG_PROMPT_ENABLED == 1U)
-    (void)dev_shell_print_prompt();  /* best-effort; init still succeeds if UART TX fails */
+    (void)dev_shell_print_prompt();
 #endif
     return DEV_OK;
 }
@@ -70,17 +70,27 @@ dev_err_t dev_shell_print_prompt(void)
     return dev_shell_write(DEV_SHELL_CFG_DEFAULT_PROMPT " ");
 }
 
+/*
+ * Bounded strlen: scans up to max_len + 1 bytes.
+ * Returns true if the string is <= max_len (fits), false if truncated.
+ */
+static bool dev_shell_strlen_bounded(const char *text, size_t *out_len)
+{
+    size_t max = DEV_SHELL_CFG_MAX_OUTPUT_LENGTH;
+    size_t n   = 0U;
+    while (n <= max && text[n] != '\0') { n++; }
+    *out_len = (n <= max) ? n : max;
+    return (n <= max);
+}
+
 dev_err_t dev_shell_write(const char *text)
 {
     size_t len;
     if (!g_state.initialized) return DEV_ERR_NOT_INITIALIZED;
     if (!text) return DEV_ERR_NULL_PTR;
 
-    len = strlen(text);
+    (void)dev_shell_strlen_bounded(text, &len);
     if (len == 0U) return DEV_OK;
-    if (len > DEV_SHELL_CFG_MAX_OUTPUT_LENGTH) {
-        len = DEV_SHELL_CFG_MAX_OUTPUT_LENGTH;
-    }
     return dev_uart_write(g_state.uart_id, (const uint8_t *)text,
                           (uint16_t)len, DEV_UART_TIMEOUT_DEFAULT_MS);
 }
@@ -141,6 +151,13 @@ dev_err_t dev_shell_execute_line(char *line)
     return cmd->function(argc, argv);
 }
 
+/*
+ * Process one iteration of the shell.
+ *
+ * UI output calls (echo, prompt, newline) use (void) because they are best-effort:
+ * a transient UART TX failure should not kill the shell loop. Command execution
+ * errors (unknown command, parse failure, callback error) ARE propagated.
+ */
 dev_err_t dev_shell_handle(void)
 {
     uint8_t  byte;
@@ -165,8 +182,9 @@ dev_err_t dev_shell_handle(void)
 #endif
             if (g_state.line_len > 0U) {
                 g_state.line[g_state.line_len] = '\0';
-                (void)dev_shell_execute_line(g_state.line);
+                e = dev_shell_execute_line(g_state.line);
                 g_state.line_len = 0U;
+                if (e != DEV_OK) return e;
             }
 #if (DEV_SHELL_CFG_PROMPT_ENABLED == 1U)
             (void)dev_shell_print_prompt();
