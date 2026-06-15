@@ -2,15 +2,29 @@
 #include "dev_compiler.h"
 
 #ifdef HAL_ADC_MODULE_ENABLED
+#include "stm32h7xx_hal.h"
+
+/* Private to this file — no vendor types in the header */
+typedef struct {
+    dev_adc_channel_t channel_id;
+    ADC_HandleTypeDef *handle;
+    uint32_t           stm32_channel;
+    uint32_t           max_raw;
+    uint32_t           reference_mv;
+} dev_adc_hw_channel_t;
 
 extern ADC_HandleTypeDef hadc1;
 extern ADC_HandleTypeDef hadc2;
 
 static const dev_adc_hw_channel_t s_adc_map[DEV_ADC_CFG_MAX_CHANNELS] = {
-    [DEV_ADC_BATTERY_SENSE]   = { DEV_ADC_BATTERY_SENSE,   &hadc1, ADC_CHANNEL_1, DEV_ADC_MAX_RAW_12BIT, DEV_ADC_REFERENCE_3300MV },
-    [DEV_ADC_TEMPERATURE_SENSE] = { DEV_ADC_TEMPERATURE_SENSE, &hadc1, ADC_CHANNEL_2, DEV_ADC_MAX_RAW_12BIT, DEV_ADC_REFERENCE_3300MV },
-    [DEV_ADC_POTENTIOMETER]   = { DEV_ADC_POTENTIOMETER,   &hadc2, ADC_CHANNEL_3, DEV_ADC_MAX_RAW_12BIT, DEV_ADC_REFERENCE_3300MV },
-    [DEV_ADC_CURRENT_SENSE]   = { DEV_ADC_CURRENT_SENSE,   &hadc2, ADC_CHANNEL_4, DEV_ADC_MAX_RAW_12BIT, DEV_ADC_REFERENCE_3300MV },
+    [DEV_ADC_BATTERY_SENSE]   = { DEV_ADC_BATTERY_SENSE,   &hadc1, ADC_CHANNEL_1,
+                                  DEV_ADC_MAX_RAW_12BIT, DEV_ADC_REFERENCE_3300MV },
+    [DEV_ADC_TEMPERATURE_SENSE] = { DEV_ADC_TEMPERATURE_SENSE, &hadc1, ADC_CHANNEL_2,
+                                  DEV_ADC_MAX_RAW_12BIT, DEV_ADC_REFERENCE_3300MV },
+    [DEV_ADC_POTENTIOMETER]   = { DEV_ADC_POTENTIOMETER,   &hadc2, ADC_CHANNEL_3,
+                                  DEV_ADC_MAX_RAW_12BIT, DEV_ADC_REFERENCE_3300MV },
+    [DEV_ADC_CURRENT_SENSE]   = { DEV_ADC_CURRENT_SENSE,   &hadc2, ADC_CHANNEL_4,
+                                  DEV_ADC_MAX_RAW_12BIT, DEV_ADC_REFERENCE_3300MV },
 };
 
 bool dev_adc_port_is_channel_valid(dev_adc_channel_t ch)
@@ -36,13 +50,15 @@ dev_err_t dev_adc_port_deinit(void)  { return DEV_OK; }
 dev_err_t dev_adc_port_read_raw(dev_adc_channel_t ch, dev_adc_raw_t *raw)
 {
     const dev_adc_hw_channel_t *c = find_ch(ch);
-    if (!c) return DEV_ERR_INVALID_ARG;
-
     HAL_StatusTypeDef hal;
     ADC_ChannelConfTypeDef sConfig = {0};
+
+    if (!c) return DEV_ERR_INVALID_ARG;
+
     sConfig.Channel = c->stm32_channel;
     sConfig.Rank = ADC_REGULAR_RANK_1;
-    (void)HAL_ADC_ConfigChannel(c->handle, &sConfig);
+    hal = HAL_ADC_ConfigChannel(c->handle, &sConfig);
+    if (hal != HAL_OK) return stm32_map(hal);
 
     hal = HAL_ADC_Start(c->handle);
     if (hal != HAL_OK) return stm32_map(hal);
@@ -72,10 +88,11 @@ dev_err_t dev_adc_port_raw_to_mv(dev_adc_channel_t ch, dev_adc_raw_t raw, dev_ad
 
 dev_err_t dev_adc_port_calibrate(dev_adc_channel_t ch)
 {
-    const dev_adc_hw_channel_t *c = find_ch(ch);
-    if (!c) return DEV_ERR_INVALID_ARG;
-    HAL_StatusTypeDef hal = HAL_ADCEx_Calibration_Start(c->handle, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
-    return stm32_map(hal);
+    /* Cube-managed mode: calibration timing is platform-specific.
+     * Return NOT_SUPPORTED; enable this if your Cube project calls
+     * HAL_ADCEx_Calibration_Start() during MX_ADC_Init(). */
+    DEV_UNUSED(ch);
+    return DEV_ERR_NOT_SUPPORTED;
 }
 
 #else /* HAL_ADC_MODULE_ENABLED not defined */

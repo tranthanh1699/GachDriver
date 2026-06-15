@@ -9,9 +9,12 @@
 #include "dev_adc_port_esp32.h"
 #include "dev_common.h"
 
+#define DEV_ADC_ESP32_ATTEN_11DB   3
+#define DEV_ADC_ESP32_BITWIDTH_12  12
+
 static const dev_adc_hw_channel_t s_map[DEV_ADC_CFG_MAX_CHANNELS] = {
-    [DEV_ADC_BATTERY_SENSE]   = { DEV_ADC_BATTERY_SENSE,   1, 6, 3, 12, 3300UL },
-    [DEV_ADC_TEMPERATURE_SENSE] = { DEV_ADC_TEMPERATURE_SENSE, 1, 7, 3, 12, 3300UL },
+    [DEV_ADC_BATTERY_SENSE]   = { DEV_ADC_BATTERY_SENSE,   1, 6, DEV_ADC_ESP32_ATTEN_11DB, DEV_ADC_ESP32_BITWIDTH_12, DEV_ADC_REFERENCE_3300MV },
+    [DEV_ADC_TEMPERATURE_SENSE] = { DEV_ADC_TEMPERATURE_SENSE, 1, 7, DEV_ADC_ESP32_ATTEN_11DB, DEV_ADC_ESP32_BITWIDTH_12, DEV_ADC_REFERENCE_3300MV },
 };
 
 bool dev_adc_port_is_channel_valid(dev_adc_channel_t ch) { DEV_UNUSED(ch); return false; }

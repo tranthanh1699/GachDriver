@@ -24,9 +24,9 @@ dev_err_t dev_adc_port_read_raw(dev_adc_channel_t ch, dev_adc_raw_t *raw)
       *raw = s_raw[ch]; return DEV_OK; }
 dev_err_t dev_adc_port_read_mv(dev_adc_channel_t ch, dev_adc_mv_t *mv)
     { if (s_error != DEV_OK) return s_error; if (!dev_adc_port_is_channel_valid(ch)) return DEV_ERR_INVALID_ARG;
-      *mv = s_use_mv[ch] ? s_mv[ch] : (dev_adc_mv_t)(((uint64_t)s_raw[ch] * 3300UL) / 4095UL); return DEV_OK; }
+      *mv = s_use_mv[ch] ? s_mv[ch] : (dev_adc_mv_t)(((uint64_t)s_raw[ch] * DEV_ADC_REFERENCE_3300MV) / DEV_ADC_MAX_RAW_12BIT); return DEV_OK; }
 dev_err_t dev_adc_port_raw_to_mv(dev_adc_channel_t ch, dev_adc_raw_t raw, dev_adc_mv_t *mv)
     { if (!dev_adc_port_is_channel_valid(ch) || !mv) return DEV_ERR_INVALID_ARG;
-      *mv = (dev_adc_mv_t)(((uint64_t)raw * 3300UL) / 4095UL); return DEV_OK; }
+      *mv = (dev_adc_mv_t)(((uint64_t)raw * DEV_ADC_REFERENCE_3300MV) / DEV_ADC_MAX_RAW_12BIT); return DEV_OK; }
 dev_err_t dev_adc_port_calibrate(dev_adc_channel_t ch)
     { DEV_UNUSED(ch); return DEV_ERR_NOT_SUPPORTED; }
