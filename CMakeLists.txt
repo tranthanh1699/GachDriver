@@ -54,6 +54,7 @@ add_subdirectory(drivers/dev_crc)
 add_subdirectory(drivers/dev_ringbuf)
 add_subdirectory(drivers/dev_uart)
 add_subdirectory(drivers/dev_log)
+add_subdirectory(drivers/dev_shell)
 
 target_link_libraries(${CMAKE_PROJECT_NAME}
     dev_common
@@ -64,6 +65,7 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     dev_ringbuf
     dev_uart
     dev_log
+    dev_shell
 )
 
 # Add project symbols (macros)
