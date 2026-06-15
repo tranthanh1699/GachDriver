@@ -39,6 +39,16 @@ dev_err_t dev_shell_cmd_explain(uint8_t argc, char *argv[])
     return DEV_OK;
 }
 
+dev_err_t dev_shell_hello(uint8_t argc, char *argv[])
+{
+    if (argc > 1U) {
+        char buf[DEV_SHELL_CFG_MAX_OUTPUT_LENGTH];
+        (void)snprintf(buf, sizeof(buf), "Hello, %s!", argv[1]);
+        return dev_shell_write_line(buf);
+    }
+    return dev_shell_write_line("Hello, World!");
+}
+
 /*
  * Command table — add your commands here.
  * Each entry: { name, help, usage, function }
@@ -46,6 +56,7 @@ dev_err_t dev_shell_cmd_explain(uint8_t argc, char *argv[])
 const dev_shell_cmd_t g_dev_shell_commands[] = {
     { "help",    "Show command list or command details", "help [command]", dev_shell_cmd_help },
     { "explain", "Explain shell usage",                  "explain",        dev_shell_cmd_explain },
+    { "hello",   "Print Hello, World!",                 "hello",          dev_shell_hello }
 };
 
 const uint16_t g_dev_shell_command_count = (uint16_t)(sizeof(g_dev_shell_commands) / sizeof(g_dev_shell_commands[0]));

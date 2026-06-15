@@ -26,7 +26,7 @@ extern const uint16_t         g_dev_shell_command_count;
 /* Built-in commands */
 dev_err_t dev_shell_cmd_help(uint8_t argc, char *argv[]);
 dev_err_t dev_shell_cmd_explain(uint8_t argc, char *argv[]);
-
+dev_err_t dev_shell_hello(uint8_t argc, char *argv[]);
 #ifdef __cplusplus
 }
 #endif

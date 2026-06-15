@@ -78,6 +78,12 @@ typedef enum {
 | `DEV_ERR_OUT_OF_RANGE` | Value out of valid range | Channel index overflow |
 | `DEV_ERR_HW_FAILURE` | Hardware / port failure | Vendor HAL returned error |
 | `DEV_ERR_CONFIG` | Static configuration invalid | Duplicate channels, bad compile-time settings |
+| `DEV_ERR_NO_ACK` | I2C: no ACK from slave | Device not present or not responding |
+| `DEV_ERR_BUS` | I2C: bus error / arbitration lost | SDA stuck, multi-master conflict |
+| `DEV_ERR_OVERFLOW` | Buffer / capacity exceeded | RX ringbuf full, line buffer overflow |
+| `DEV_ERR_EMPTY` | Buffer / collection empty | RX ringbuf empty, no data available |
+| `DEV_ERR_NOT_FOUND` | Lookup failed | Unknown shell command |
+| `DEV_ERR_PARSE` | Parse failure | Invalid number format in shell |
 
 ---
 
@@ -179,6 +185,9 @@ void dev_assert_report(const char *file, uint32_t line,
 
 /* Call expression; if it returns non-DEV_OK, report and propagate the error */
 #define DEV_CHECK_OK_RET(expression)
+
+/* Fast null/validation check — return error code without logging */
+#define DEV_RETURN_ON_FALSE(condition, error_code)
 
 /* Fatal assert — never returns if condition is false */
 #define DEV_ASSERT(condition)

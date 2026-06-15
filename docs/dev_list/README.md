@@ -2,189 +2,122 @@
 
 ## 1. Overview
 
-`dev_list` is a static-memory singly-linked list for embedded systems. No dynamic allocation — all memory is caller-owned and provided at init time.
+Static-memory singly-linked list. No dynamic allocation — caller provides node pool + data buffer at init time. Each node stores the actual payload size; pop returns exactly that many bytes.
 
-- **Fixed capacity** — pool of pre-allocated nodes + data buffer
-- **Variable-size items** — each push stores the actual payload size, pop returns exactly that many bytes
-- **Overflow-safe** — `DEV_LIST_MAX_CAPACITY(item_size)` prevents `capacity * item_size` wrap
-- **Zero dependencies** — only `<stdbool.h>`, `<stddef.h>`, `<stdint.h>`, `<string.h>`
+- **Variable-size items** — push 2 bytes, pop gets 2 bytes; push 8 bytes, pop gets 8
+- **Overflow-safe init** — `DEV_LIST_MAX_CAPACITY(item_size)` prevents wrap
+- **O(1) head**, O(n) tail for pop/remove
 
 ---
 
-## 2. Quick Start
+## 2. Quick Start — How to Use
 
 ```c
 #include "dev_list.h"
 
-#define CAP  (4U)
-#define ISZ  (32U)
+#define CAP  8U
+#define ISZ  32U
 
 static dev_list_node_t nodes[CAP];
-static uint8_t         data[CAP * ISZ];
+static uint8_t         pool[CAP * ISZ];
 static dev_list_t      list;
 
 int main(void)
 {
-    dev_list_init(&list, nodes, data, CAP, ISZ);
+    uint8_t buf[ISZ];
 
+    dev_list_init(&list, nodes, pool, CAP, ISZ);
+
+    /* Push at tail, pop from head → FIFO queue */
     dev_list_push_tail(&list, "hello", 5);
     dev_list_push_tail(&list, "world", 5);
 
-    uint8_t buf[ISZ];
     while (dev_list_pop_head(&list, buf, ISZ)) {
-        /* process buf */
+        /* buf contains "hello", then "world" */
     }
+
+    /* Push at head, pop from head → LIFO stack */
+    dev_list_push_head(&list, "first",  5);
+    dev_list_push_head(&list, "second", 6);
+    dev_list_pop_head(&list, buf, ISZ);   /* "second" */
+    dev_list_pop_head(&list, buf, ISZ);   /* "first"  */
+
+    /* Variable-size items */
+    dev_list_push_tail(&list, "AB", 2);
+    dev_list_push_tail(&list, "CDEFGH", 6);
+    dev_list_pop_head(&list, buf, ISZ);   /* 2 bytes */
+    dev_list_pop_head(&list, buf, ISZ);   /* 6 bytes */
+
+    return 0;
 }
 ```
 
 ---
 
-## 3. Types
+## 3. Configuration — `dev_list.h`
 
-### 3.1 Node
-
-```c
-typedef struct dev_list_node {
-    void                 *data;       /* pointer into data_pool */
-    size_t                data_size;  /* actual payload bytes stored */
-    struct dev_list_node *next;
-} dev_list_node_t;
-```
-
-### 3.2 List
+No separate cfg header needed. All configuration is in the init call:
 
 ```c
-typedef struct {
-    dev_list_node_t *node_pool;   /* caller-owned node array */
-    uint8_t         *data_pool;   /* caller-owned data buffer */
-    dev_list_node_t *free_head;   /* internal freelist */
-    size_t           capacity;    /* max node count */
-    size_t           item_size;   /* max bytes per element */
-    dev_list_node_t *head;        /* first node */
-    dev_list_node_t *tail;        /* last node */
-    size_t           size;        /* current count */
-} dev_list_t;
+dev_list_init(&list, node_pool, data_pool, capacity, item_size);
 ```
 
-All fields are **private-by-convention** — use API functions only.
+| Parameter | Meaning | Typical Value |
+|-----------|---------|---------------|
+| `node_pool` | Static array of `dev_list_node_t` | `dev_list_node_t nodes[8]` |
+| `data_pool` | Static byte array for payloads | `uint8_t data[8 * 32]` |
+| `capacity` | Max number of elements | `8U` |
+| `item_size` | Max bytes per element | `32U` |
 
-### 3.3 Capacity macro
-
-```c
-#define DEV_LIST_MAX_CAPACITY(item_size) \
-    ((item_size) > 0U ? (SIZE_MAX / (item_size)) : 0U)
-```
-
-Use this to size your pools safely:
-
-```c
-dev_list_node_t nodes[DEV_LIST_MAX_CAPACITY(64U)];   // overflow-safe
-uint8_t         data [DEV_LIST_MAX_CAPACITY(64U) * 64U];
-```
+If `capacity > SIZE_MAX / item_size`, init returns `false` (overflow guard). This is tested by `DEV_LIST_MAX_CAPACITY(item_size)`.
 
 ---
 
 ## 4. API Reference
 
-### 4.1 Init / Destroy
+| Function | Description | O() |
+|----------|-------------|-----|
+| `dev_list_init(list, nodes, data, cap, isz)` | Initialize with static pools | O(n) |
+| `dev_list_destroy(list)` | Reset to empty, reuse same pools | O(n) |
+| `dev_list_push_head(list, data, data_size)` | Insert at front | O(1) |
+| `dev_list_push_tail(list, data, data_size)` | Insert at back | O(1) |
+| `dev_list_pop_head(list, out, out_size)` | Remove from front, copy payload | O(1) |
+| `dev_list_pop_tail(list, out, out_size)` | Remove from back, copy payload | O(n) |
+| `dev_list_remove_head(list)` | Discard head | O(1) |
+| `dev_list_remove_tail(list)` | Discard tail | O(n) |
+| `dev_list_size(list)` | Current count | O(1) |
+| `dev_list_head(list)` | Read-only head pointer | O(1) |
+| `dev_list_next(node)` | Read-only next pointer | O(1) |
+| `dev_list_node_data(node)` | Read-only payload pointer | O(1) |
+| `dev_list_node_data_size(node)` | Stored payload size | O(1) |
+
+### Return values
+
+| Condition | Push/Pop return |
+|-----------|-----------------|
+| Success | `true` |
+| NULL pools, zero cap/size | `false` (init only) |
+| NULL data, zero data_size | `false` |
+| data_size > item_size | `false` |
+| List full (no free nodes) | `false` |
+| List empty | `false` |
+| out_size < stored data_size | `false` |
+| Uninitialized | `false` |
+
+### Iteration
 
 ```c
-bool dev_list_init(dev_list_t *list, dev_list_node_t *node_pool,
-                   void *data_pool, size_t capacity, size_t item_size);
-```
-
-Returns `false` if: NULL pointers, zero capacity/item_size, or overflow (`capacity > SIZE_MAX / item_size`).
-
-```c
-void dev_list_destroy(dev_list_t *list);
-```
-
-Resets list to empty — all nodes returned to free pool. Safe to re-init afterwards.
-
-### 4.2 Push
-
-```c
-bool dev_list_push_head(dev_list_t *list, const void *data, size_t data_size);
-bool dev_list_push_tail(dev_list_t *list, const void *data, size_t data_size);
-```
-
-Returns `false` if: uninitialized, NULL data, `data_size == 0`, `data_size > item_size`, or list full.
-
-Allocate → zero-fill → copy data → link into list. O(1) for head push. O(1) for tail push.
-
-### 4.3 Pop
-
-```c
-bool dev_list_pop_head(dev_list_t *list, void *out_data, size_t out_size);
-bool dev_list_pop_tail(dev_list_t *list, void *out_data, size_t out_size);
-```
-
-Copies **exactly the stored `data_size` bytes** (not `item_size`). Returns `false` if: uninitialized, NULL out_data, `out_size < stored data_size`, or empty.
-
-O(1) for head pop. O(n) for tail pop (follows the linked list to find prev).
-
-### 4.4 Remove (discard)
-
-```c
-void dev_list_remove_head(dev_list_t *list);   // O(1)
-void dev_list_remove_tail(dev_list_t *list);   // O(n)
-```
-
-No-op if empty or uninitialized. Returns node to free pool, decrements size.
-
-### 4.5 Query
-
-```c
-size_t               dev_list_size(const dev_list_t *list);
-const dev_list_node_t *dev_list_head(const dev_list_t *list);
-const dev_list_node_t *dev_list_next(const dev_list_node_t *node);
-const void           *dev_list_node_data(const dev_list_node_t *node);
-size_t                dev_list_node_data_size(const dev_list_node_t *node);
+for (const dev_list_node_t *n = dev_list_head(&list); n; n = dev_list_next(n)) {
+    const void *payload = dev_list_node_data(n);
+    size_t size = dev_list_node_data_size(n);
+}
 ```
 
 ---
 
-## 5. Usage Patterns
+## 5. Porting — No Changes Needed
 
-### 5.1 FIFO queue (head = dequeue, tail = enqueue)
-
-```c
-dev_list_push_tail(&list, &item, sizeof(item));   // enqueue
-dev_list_pop_head(&list, &item, sizeof(item));    // dequeue
-```
-
-### 5.2 LIFO stack (head = push/pop)
-
-```c
-dev_list_push_head(&list, &item, sizeof(item));
-dev_list_pop_head(&list, &item, sizeof(item));
-```
-
-### 5.3 Variable-size messages
-
-```c
-dev_list_push_tail(&list, "OK", 2);
-dev_list_push_tail(&list, "ERROR_TIMEOUT", 13);
-
-uint8_t buf[32];
-size_t len;
-if (dev_list_pop_head(&list, buf, sizeof(buf))) {
-    len = dev_list_node_data_size(dev_list_head(&list)); // got 2 or 13
-}
-```
-
-### 5.4 Iteration
-
-```c
-for (const dev_list_node_t *n = dev_list_head(&list);
-     n != NULL;
-     n = dev_list_next(n))
-{
-    const void   *data = dev_list_node_data(n);
-    size_t        size = dev_list_node_data_size(n);
-    /* process */
-}
-```
+`dev_list` is pure C software — it has no hardware dependency and no port layer. Works on any platform with `<string.h>` and `<stddef.h>`.
 
 ---
 
@@ -195,7 +128,7 @@ add_subdirectory(drivers/dev_list)
 target_link_libraries(${PROJECT_NAME} dev_list)
 ```
 
-No dependencies — `dev_list` is self-contained (does not depend on `dev_common`).
+No dependencies — dev_list is self-contained (does not depend on dev_common).
 
 ---
 
@@ -204,9 +137,8 @@ No dependencies — `dev_list` is self-contained (does not depend on `dev_common
 | Rule | Status |
 |------|--------|
 | No dynamic allocation | ✓ Caller-owned static pools |
-| No recursion | ✓ Iterative only |
-| No unbounded loops | ✓ Bounded by capacity |
-| No magic numbers | ✓ All constants named |
-| Fixed-width types | ✓ `size_t`, `uint8_t` |
 | Overflow guard | ✓ `DEV_LIST_MAX_CAPACITY` check in init |
 | NULL validation | ✓ All public APIs validate pointers |
+| No recursion | ✓ Iterative only |
+| No unbounded loops | ✓ Bounded by capacity |
+| Per-node data_size | ✓ Pop returns exact stored size |

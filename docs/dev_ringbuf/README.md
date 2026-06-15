@@ -2,74 +2,92 @@
 
 ## 1. Overview
 
-Fixed-size single-producer/single-consumer byte ring buffer for embedded use. No dynamic allocation — caller provides the storage.
+Fixed-size single-producer/single-consumer byte ring buffer. Caller provides static storage. Used by `dev_uart` for RX buffering (ISR pushes, main loop pops).
 
-- **ISR-safe fast path**: `try_push()` / `try_pop()` return `bool`, no error detail
-- **Non-ISR path**: `write()` / `pop()` return `dev_err_t` with specific error codes
-- **Usable capacity**: `capacity - 1` (one slot reserved to distinguish full from empty)
-- **Concurrency**: SPSC contract — one writer of `head`, one writer of `tail`
+- **ISR-safe fast path**: `try_push()` / `try_pop()` return `bool`
+- **Non-ISR path**: `write()` / `pop()` return `dev_err_t`
+- **Usable capacity**: `capacity - 1` (one slot reserved)
 
 ---
 
-## 2. Quick Start
+## 2. Quick Start — How to Use
 
 ```c
 #include "dev_ringbuf.h"
 
-static uint8_t      rx_buf[64];
-static dev_ringbuf_t rx_ring;
+#define CAP  64U
+static uint8_t      buf[CAP];
+static dev_ringbuf_t rb;
 
-// Init
-dev_ringbuf_init(&rx_ring, rx_buf, sizeof(rx_buf));
-
-// ISR (producer): fast, bool return
-void UART_IRQHandler(void) {
+/* ISR (producer) — fast, bool return */
+void UART_ISR(void) {
     uint8_t byte = UART->DR;
-    dev_ringbuf_try_push(&rx_ring, byte);  // silently drops if full
+    dev_ringbuf_try_push(&rb, byte);  /* silently drops if full */
 }
 
-// Main loop (consumer): dev_err_t return
+/* Main loop (consumer) — dev_err_t return */
 void main_loop(void) {
     uint8_t byte;
-    if (dev_ringbuf_pop(&rx_ring, &byte) == DEV_OK) {
+    if (dev_ringbuf_pop(&rb, &byte) == DEV_OK) {
         process(byte);
     }
+}
+
+int main(void) {
+    dev_ringbuf_init(&rb, buf, CAP);
+    /* ... */
 }
 ```
 
 ---
 
-## 3. API
+## 3. Configuration
 
-| Function | ISR-safe | Return | Full/Empty behavior |
-|----------|----------|--------|---------------------|
-| `try_push(r, v)` | Yes | `bool` | `false` if full or invalid |
-| `try_pop(r, *v)` | Yes | `bool` | `false` if empty or invalid |
-| `write(r, v)` | No | `dev_err_t` | `DEV_ERR_BUSY` if full, `DEV_ERR_INVALID_ARG` if invalid |
-| `pop(r, *v)` | No | `dev_err_t` | `DEV_ERR_BUSY` if empty, `DEV_ERR_NULL_PTR` if null out |
-| `read(r, data, len, *n)` | No | `dev_err_t` | Reads up to `len` bytes, sets `*n` to actual count |
-| `available(r)` | Yes | `size_t` | 0 if invalid or empty |
-| `capacity(r)` | Yes | `size_t` | Usable capacity = `capacity - 1` |
-| `free(r)` | Yes | `size_t` | Free space = `capacity - available` |
-| `flush(r)` | No | `dev_err_t` | Drops all data. Caller must ensure no concurrent push/pop |
-| `is_valid(r)` | Yes | `bool` | Validates pointer, capacity ≥ 2, head/tail < capacity |
+| Parameter | Meaning | Typical |
+|-----------|---------|---------|
+| `storage` | Static byte array | `uint8_t buf[64]` |
+| `capacity` | Total array size (must be >= 2) | `64U` |
+
+**Capacity note**: Usable space is `capacity - 1`. One slot is reserved to distinguish full from empty. A 64-byte buffer stores up to 63 bytes.
 
 ---
 
-## 4. Concurrency Contract
+## 4. API Reference
 
-- One context writes `head` (producer: ISR or task)
-- One context writes `tail` (consumer: ISR or task)
-- `flush()` writes `tail = head` — disable the producer ISR before calling
-- On platforms where `size_t` is wider than native word size, wrap in critical section
+| Function | ISR-safe | Return | Full/Empty |
+|----------|----------|--------|------------|
+| `init(rb, buf, cap)` | No | `dev_err_t` | — |
+| `try_push(rb, byte)` | **Yes** | `bool` | `false` |
+| `try_pop(rb, *out)` | **Yes** | `bool` | `false` |
+| `write(rb, byte)` | No | `dev_err_t` | `DEV_ERR_BUSY` |
+| `pop(rb, *out)` | No | `dev_err_t` | `DEV_ERR_BUSY` |
+| `read(rb, data, len, *read_len)` | No | `dev_err_t` | Reads up to `len` |
+| `available(rb)` | **Yes** | `size_t` | 0 if empty |
+| `capacity(rb)` | **Yes** | `size_t` | Usable = cap - 1 |
+| `free(rb)` | **Yes** | `size_t` | Free space |
+| `flush(rb)` | No | `dev_err_t` | Clears all data |
+| `is_valid(rb)` | **Yes** | `bool` | Validates context |
+
+### Concurrency Contract
+
+- **One** context writes `head` (producer: ISR or task)
+- **One** context writes `tail` (consumer: another task)
+- `flush()` writes `tail = head` — **disable the producer ISR** before calling
+- On platforms where `size_t` > native word size, wrap in critical section
 
 ---
 
-## 5. Build
+## 5. Porting — No Changes Needed
+
+`dev_ringbuf` is pure C software with no hardware dependency. Works on any platform.
+
+---
+
+## 6. Build
 
 ```cmake
 add_subdirectory(drivers/dev_ringbuf)
 target_link_libraries(${PROJECT_NAME} dev_ringbuf)
 ```
 
-14/14 tests pass.
+Depends on `dev_common` for `dev_err_t` and `DEV_RETURN_ON_FALSE`.
