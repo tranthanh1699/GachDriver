@@ -2,32 +2,40 @@
 #include "dev_common.h"
 #include <string.h>
 #include <stdlib.h>
-#include <ctype.h>
+#include <errno.h>
+#include <limits.h>
 
 dev_err_t dev_shell_parse_line(char *line, char *argv[], uint8_t max_args, uint8_t *argc)
 {
     uint8_t count = 0U;
-    bool    in_quote = false;
 
     if ((line == NULL) || (argv == NULL) || (argc == NULL)) return DEV_ERR_NULL_PTR;
     if (max_args == 0U) return DEV_ERR_INVALID_ARG;
 
     while (*line != '\0') {
+        /* Skip whitespace */
         while (*line == ' ' || *line == '\t') line++;
         if (*line == '\0') break;
         if (count >= max_args) return DEV_ERR_OVERFLOW;
 
-        argv[count++] = line;
-        if (*line == '"') { line++; in_quote = true; }
-
-        while (*line != '\0') {
-            if (in_quote && *line == '"') { *line = '\0'; line++; in_quote = false; break; }
-            if (!in_quote && (*line == ' ' || *line == '\t')) { *line = '\0'; line++; break; }
-            line++;
+#if (DEV_SHELL_CFG_QUOTE_PARSE_ENABLED == 1U)
+        if (*line == '"') {
+            line++;                         /* skip opening quote */
+            argv[count++] = line;            /* arg starts after quote */
+            while (*line != '\0' && *line != '"') line++;
+            if (*line == '\0') return DEV_ERR_PARSE;  /* unterminated quote */
+            *line = '\0';                    /* close arg */
+            line++;                          /* skip closing quote */
+            continue;
         }
+#endif
+
+        argv[count++] = line;
+        while (*line != '\0' && *line != ' ' && *line != '\t') line++;
+        if (*line != '\0') { *line = '\0'; line++; }
     }
     *argc = count;
-    return (count > 0U) ? DEV_OK : DEV_OK;
+    return DEV_OK;
 }
 
 bool dev_shell_arg_is_equal(const char *arg, const char *expected)
@@ -37,8 +45,11 @@ dev_err_t dev_shell_arg_to_i32(const char *arg, int32_t *value)
 {
     char *end;
     if (!arg || !value) return DEV_ERR_NULL_PTR;
+    if (*arg == '\0') return DEV_ERR_PARSE;
+    errno = 0;
     long v = strtol(arg, &end, 10);
     if (*end != '\0' || end == arg) return DEV_ERR_PARSE;
+    if (errno == ERANGE || v > INT32_MAX || v < INT32_MIN) return DEV_ERR_OUT_OF_RANGE;
     *value = (int32_t)v;
     return DEV_OK;
 }
@@ -47,8 +58,13 @@ dev_err_t dev_shell_arg_to_u32(const char *arg, uint32_t *value)
 {
     char *end;
     if (!arg || !value) return DEV_ERR_NULL_PTR;
+    if (*arg == '\0') return DEV_ERR_PARSE;
+    /* Reject leading minus sign for unsigned */
+    if (*arg == '-') return DEV_ERR_PARSE;
+    errno = 0;
     unsigned long v = strtoul(arg, &end, 10);
     if (*end != '\0' || end == arg) return DEV_ERR_PARSE;
+    if (errno == ERANGE || v > UINT32_MAX) return DEV_ERR_OUT_OF_RANGE;
     *value = (uint32_t)v;
     return DEV_OK;
 }
@@ -85,8 +101,11 @@ dev_err_t dev_shell_arg_to_hex_u32(const char *arg, uint32_t *value)
 {
     char *end;
     if (!arg || !value) return DEV_ERR_NULL_PTR;
+    if (*arg == '\0') return DEV_ERR_PARSE;
+    errno = 0;
     unsigned long v = strtoul(arg, &end, 16);
     if (*end != '\0' || end == arg) return DEV_ERR_PARSE;
+    if (errno == ERANGE || v > UINT32_MAX) return DEV_ERR_OUT_OF_RANGE;
     *value = (uint32_t)v;
     return DEV_OK;
 }

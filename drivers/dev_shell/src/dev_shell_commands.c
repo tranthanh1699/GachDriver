@@ -1,5 +1,6 @@
 #include "dev_shell.h"
 #include "dev_shell_cfg.h"
+#include "dev_shell_commands.h"
 #include "dev_shell_parser.h"
 #include "dev_common.h"
 #include <stdio.h>

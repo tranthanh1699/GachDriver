@@ -14,6 +14,7 @@ typedef struct {
     char          line[DEV_SHELL_CFG_MAX_LINE_LENGTH];
     uint16_t      line_len;
     bool          initialized;
+    bool          last_was_cr;     /* for CRLF dedup */
 } dev_shell_state_t;
 
 static dev_shell_state_t g_state;
@@ -27,26 +28,33 @@ dev_err_t dev_shell_init(dev_uart_id_t uart_id)
 
     g_state.uart_id     = uart_id;
     g_state.line_len    = 0U;
-    g_state.initialized = true;
+    g_state.initialized = false;  /* set true only after validation passes */
+    g_state.last_was_cr = false;
+    memset(g_state.line, 0, sizeof(g_state.line));
 
     /* Ensure UART is initialized */
     if (!dev_uart_is_initialized()) {
         dev_err_t ue = dev_uart_init();
-        if (ue != DEV_OK) { g_state.initialized = false; return ue; }
+        if (ue != DEV_OK) return ue;
     }
-    memset(g_state.line, 0, sizeof(g_state.line));
 
-    /* Validate command table */
+    /* Validate command table BEFORE marking initialized */
     if (g_dev_shell_command_count > DEV_SHELL_CFG_MAX_COMMANDS) return DEV_ERR_CONFIG;
 
-    /* Detect duplicates */
     for (uint16_t i = 0U; i < g_dev_shell_command_count; i++) {
-        if (!g_dev_shell_commands[i].name || !g_dev_shell_commands[i].function)
+        const dev_shell_cmd_t *c = &g_dev_shell_commands[i];
+        if (!c->name || !c->help || !c->usage || !c->function)
             return DEV_ERR_CONFIG;
+
+        /* Reject names containing spaces */
+        if (strchr(c->name, ' ') != NULL) return DEV_ERR_CONFIG;
+
         for (uint16_t j = i + 1U; j < g_dev_shell_command_count; j++)
-            if (strcmp(g_dev_shell_commands[i].name, g_dev_shell_commands[j].name) == 0)
+            if (strcmp(c->name, g_dev_shell_commands[j].name) == 0)
                 return DEV_ERR_CONFIG;
     }
+
+    g_state.initialized = true;
 
 #if (DEV_SHELL_CFG_PROMPT_ENABLED == 1U)
     dev_shell_print_prompt();
@@ -140,11 +148,17 @@ dev_err_t dev_shell_handle(void)
 
     if (!g_state.initialized) return DEV_ERR_NOT_INITIALIZED;
 
-    /* Process all available bytes */
     for (;;) {
         e = dev_uart_read(g_state.uart_id, &byte, 1U, &n, DEV_UART_TIMEOUT_NO_WAIT);
         if (e == DEV_ERR_EMPTY || n == 0U) break;
         if (e != DEV_OK) return e;
+
+        /* CRLF dedup: if last char was CR and this is LF, skip LF */
+        if (byte == LF && g_state.last_was_cr) {
+            g_state.last_was_cr = false;
+            continue;
+        }
+        g_state.last_was_cr = (byte == CR);
 
         /* Handle Enter */
         if (byte == CR || byte == LF) {
@@ -155,8 +169,7 @@ dev_err_t dev_shell_handle(void)
 #endif
             if (g_state.line_len > 0U) {
                 g_state.line[g_state.line_len] = '\0';
-                e = dev_shell_execute_line(g_state.line);
-                (void)e;
+                (void)dev_shell_execute_line(g_state.line);
                 g_state.line_len = 0U;
             }
 #if (DEV_SHELL_CFG_PROMPT_ENABLED == 1U)

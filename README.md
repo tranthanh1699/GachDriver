@@ -24,6 +24,7 @@ Application → dev_* public API → common implementation → port interface �
 | `dev_list` | Fixed-capacity singly-linked list | [docs/dev_list/README.md](docs/dev_list/README.md) |
 | `dev_ringbuf` | SPSC byte ring buffer | [docs/dev_ringbuf/README.md](docs/dev_ringbuf/README.md) |
 | `dev_uart` | UART wrapper (logical ID, RX buffering) | [docs/dev_uart/README.md](docs/dev_uart/README.md) |
+| `dev_shell` | UART command shell | [docs/dev_shell/README.md](docs/dev_shell/README.md) |
 
 ## Quick Start
 
