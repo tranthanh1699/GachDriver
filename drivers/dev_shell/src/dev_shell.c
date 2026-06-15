@@ -14,7 +14,7 @@ typedef struct {
     char          line[DEV_SHELL_CFG_MAX_LINE_LENGTH];
     uint16_t      line_len;
     bool          initialized;
-    bool          last_was_cr;     /* for CRLF dedup */
+    bool          last_was_cr;
 } dev_shell_state_t;
 
 static dev_shell_state_t g_state;
@@ -28,27 +28,22 @@ dev_err_t dev_shell_init(dev_uart_id_t uart_id)
 
     g_state.uart_id     = uart_id;
     g_state.line_len    = 0U;
-    g_state.initialized = false;  /* set true only after validation passes */
+    g_state.initialized = false;
     g_state.last_was_cr = false;
     memset(g_state.line, 0, sizeof(g_state.line));
 
-    /* Ensure UART is initialized */
     if (!dev_uart_is_initialized()) {
         dev_err_t ue = dev_uart_init();
         if (ue != DEV_OK) return ue;
     }
 
-    /* Validate command table BEFORE marking initialized */
     if (g_dev_shell_command_count > DEV_SHELL_CFG_MAX_COMMANDS) return DEV_ERR_CONFIG;
 
     for (uint16_t i = 0U; i < g_dev_shell_command_count; i++) {
         const dev_shell_cmd_t *c = &g_dev_shell_commands[i];
         if (!c->name || !c->help || !c->usage || !c->function)
             return DEV_ERR_CONFIG;
-
-        /* Reject names containing spaces */
         if (strchr(c->name, ' ') != NULL) return DEV_ERR_CONFIG;
-
         for (uint16_t j = i + 1U; j < g_dev_shell_command_count; j++)
             if (strcmp(c->name, g_dev_shell_commands[j].name) == 0)
                 return DEV_ERR_CONFIG;
@@ -57,7 +52,7 @@ dev_err_t dev_shell_init(dev_uart_id_t uart_id)
     g_state.initialized = true;
 
 #if (DEV_SHELL_CFG_PROMPT_ENABLED == 1U)
-    dev_shell_print_prompt();
+    (void)dev_shell_print_prompt();  /* best-effort; init still succeeds if UART TX fails */
 #endif
     return DEV_OK;
 }
@@ -77,10 +72,15 @@ dev_err_t dev_shell_print_prompt(void)
 
 dev_err_t dev_shell_write(const char *text)
 {
+    size_t len;
     if (!g_state.initialized) return DEV_ERR_NOT_INITIALIZED;
     if (!text) return DEV_ERR_NULL_PTR;
-    size_t len = strlen(text);
+
+    len = strlen(text);
     if (len == 0U) return DEV_OK;
+    if (len > DEV_SHELL_CFG_MAX_OUTPUT_LENGTH) {
+        len = DEV_SHELL_CFG_MAX_OUTPUT_LENGTH;
+    }
     return dev_uart_write(g_state.uart_id, (const uint8_t *)text,
                           (uint16_t)len, DEV_UART_TIMEOUT_DEFAULT_MS);
 }
@@ -107,6 +107,7 @@ dev_err_t dev_shell_write_data(const uint8_t *data, uint16_t length)
 dev_err_t dev_shell_find_command(const char *name, const dev_shell_cmd_t **command)
 {
     if (!name || !command) return DEV_ERR_NULL_PTR;
+    if (!g_state.initialized) return DEV_ERR_NOT_INITIALIZED;
     for (uint16_t i = 0U; i < g_dev_shell_command_count; i++) {
         if (strcmp(g_dev_shell_commands[i].name, name) == 0) {
             *command = &g_dev_shell_commands[i];
@@ -132,8 +133,8 @@ dev_err_t dev_shell_execute_line(char *line)
 
     e = dev_shell_find_command(argv[0], &cmd);
     if (e != DEV_OK) {
-        dev_shell_write("Unknown command: ");
-        dev_shell_write_line(argv[0]);
+        (void)dev_shell_write("Unknown command: ");
+        (void)dev_shell_write_line(argv[0]);
         return e;
     }
 
@@ -153,19 +154,14 @@ dev_err_t dev_shell_handle(void)
         if (e == DEV_ERR_EMPTY || n == 0U) break;
         if (e != DEV_OK) return e;
 
-        /* CRLF dedup: if last char was CR and this is LF, skip LF */
-        if (byte == LF && g_state.last_was_cr) {
-            g_state.last_was_cr = false;
-            continue;
-        }
+        if (byte == LF && g_state.last_was_cr) { g_state.last_was_cr = false; continue; }
         g_state.last_was_cr = (byte == CR);
 
-        /* Handle Enter */
         if (byte == CR || byte == LF) {
 #if (DEV_SHELL_CFG_CRLF_ENABLED == 1U)
-            dev_shell_write("\r\n");
+            (void)dev_shell_write("\r\n");
 #else
-            dev_shell_write("\n");
+            (void)dev_shell_write("\n");
 #endif
             if (g_state.line_len > 0U) {
                 g_state.line[g_state.line_len] = '\0';
@@ -173,39 +169,36 @@ dev_err_t dev_shell_handle(void)
                 g_state.line_len = 0U;
             }
 #if (DEV_SHELL_CFG_PROMPT_ENABLED == 1U)
-            dev_shell_print_prompt();
+            (void)dev_shell_print_prompt();
 #endif
             continue;
         }
 
-        /* Handle Backspace */
         if (byte == BS || byte == DEL) {
 #if (DEV_SHELL_CFG_BACKSPACE_ENABLED == 1U)
             if (g_state.line_len > 0U) {
                 g_state.line_len--;
 #if (DEV_SHELL_CFG_ECHO_ENABLED == 1U)
-                dev_shell_write("\b \b");
+                (void)dev_shell_write("\b \b");
 #endif
             }
 #endif
             continue;
         }
 
-        /* Skip non-printable */
         if (byte < SPC && byte != TAB) continue;
 
-        /* Store char */
         if (g_state.line_len >= (DEV_SHELL_CFG_MAX_LINE_LENGTH - 1U)) {
-            dev_shell_write_line("");
-            dev_shell_write_line("Line too long, cleared.");
+            (void)dev_shell_write_line("");
+            (void)dev_shell_write_line("Line too long, cleared.");
             g_state.line_len = 0U;
-            dev_shell_print_prompt();
-            continue;
+            (void)dev_shell_print_prompt();
+            return DEV_ERR_OVERFLOW;
         }
 
         g_state.line[g_state.line_len++] = (char)byte;
 #if (DEV_SHELL_CFG_ECHO_ENABLED == 1U)
-        dev_shell_write_data(&byte, 1U);
+        (void)dev_shell_write_data(&byte, 1U);
 #endif
     }
     return DEV_OK;
