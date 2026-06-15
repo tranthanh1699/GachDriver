@@ -12,6 +12,7 @@ extern "C" {
 dev_err_t dev_uart_init(void);
 dev_err_t dev_uart_deinit(void);
 bool     dev_uart_is_initialized(void);
+bool     dev_uart_is_valid(dev_uart_id_t uart);
 
 dev_err_t dev_uart_config(dev_uart_id_t uart, dev_uart_baudrate_t baud,
                           dev_uart_data_bits_t db, dev_uart_stop_bits_t sb,

@@ -24,7 +24,7 @@ bool dev_shell_is_initialized(void) { return g_state.initialized; }
 dev_err_t dev_shell_init(dev_uart_id_t uart_id)
 {
     if (g_state.initialized) return DEV_ERR_ALREADY_INITIALIZED;
-    if (uart_id >= DEV_UART_CFG_MAX_INSTANCES) return DEV_ERR_INVALID_ARG;
+    if (!dev_uart_is_valid(uart_id)) return DEV_ERR_INVALID_ARG;
 
     g_state.uart_id     = uart_id;
     g_state.line_len    = 0U;

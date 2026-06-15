@@ -7,8 +7,13 @@ uint8_t g_uart_id = 0;
 
 void dev_log_init(uint8_t uart_id)
 {
+    if (!dev_uart_is_valid((dev_uart_id_t)uart_id)) return;
+
     g_uart_id = uart_id;
-    dev_uart_init();
+
+    if (!dev_uart_is_initialized()) {
+        dev_uart_init();
+    }
 }
 void dev_log(const char* str, ...)
 {

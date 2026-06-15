@@ -42,6 +42,8 @@ dev_err_t dev_uart_deinit(void)
 
 bool dev_uart_is_initialized(void) { return g_initialized; }
 
+bool dev_uart_is_valid(dev_uart_id_t uart) { return (uart < DEV_UART_CFG_MAX_INSTANCES); }
+
 dev_err_t dev_uart_config(dev_uart_id_t u, dev_uart_baudrate_t b,
                           dev_uart_data_bits_t db, dev_uart_stop_bits_t sb,
                           dev_uart_parity_t p, dev_uart_flow_control_t fc)
