@@ -25,6 +25,7 @@ Application → dev_* public API → common implementation → port interface �
 | `dev_ringbuf` | SPSC byte ring buffer | [docs/dev_ringbuf/README.md](docs/dev_ringbuf/README.md) |
 | `dev_uart` | UART wrapper (logical ID, RX buffering) | [docs/dev_uart/README.md](docs/dev_uart/README.md) |
 | `dev_shell` | UART command shell | [docs/dev_shell/README.md](docs/dev_shell/README.md) |
+| `dev_adc` | ADC wrapper (logical channel, raw/mV, average) | [docs/dev_adc/README.md](docs/dev_adc/README.md) |
 
 ## Quick Start
 
