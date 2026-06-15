@@ -7,10 +7,10 @@ extern ADC_HandleTypeDef hadc1;
 extern ADC_HandleTypeDef hadc2;
 
 static const dev_adc_hw_channel_t s_adc_map[DEV_ADC_CFG_MAX_CHANNELS] = {
-    [DEV_ADC_BATTERY_SENSE]   = { DEV_ADC_BATTERY_SENSE,   &hadc1, ADC_CHANNEL_1, 4095UL, 3300UL },
-    [DEV_ADC_TEMPERATURE_SENSE] = { DEV_ADC_TEMPERATURE_SENSE, &hadc1, ADC_CHANNEL_2, 4095UL, 3300UL },
-    [DEV_ADC_POTENTIOMETER]   = { DEV_ADC_POTENTIOMETER,   &hadc2, ADC_CHANNEL_3, 4095UL, 3300UL },
-    [DEV_ADC_CURRENT_SENSE]   = { DEV_ADC_CURRENT_SENSE,   &hadc2, ADC_CHANNEL_4, 4095UL, 3300UL },
+    [DEV_ADC_BATTERY_SENSE]   = { DEV_ADC_BATTERY_SENSE,   &hadc1, ADC_CHANNEL_1, DEV_ADC_MAX_RAW_12BIT, DEV_ADC_REFERENCE_3300MV },
+    [DEV_ADC_TEMPERATURE_SENSE] = { DEV_ADC_TEMPERATURE_SENSE, &hadc1, ADC_CHANNEL_2, DEV_ADC_MAX_RAW_12BIT, DEV_ADC_REFERENCE_3300MV },
+    [DEV_ADC_POTENTIOMETER]   = { DEV_ADC_POTENTIOMETER,   &hadc2, ADC_CHANNEL_3, DEV_ADC_MAX_RAW_12BIT, DEV_ADC_REFERENCE_3300MV },
+    [DEV_ADC_CURRENT_SENSE]   = { DEV_ADC_CURRENT_SENSE,   &hadc2, ADC_CHANNEL_4, DEV_ADC_MAX_RAW_12BIT, DEV_ADC_REFERENCE_3300MV },
 };
 
 bool dev_adc_port_is_channel_valid(dev_adc_channel_t ch)
@@ -42,13 +42,12 @@ dev_err_t dev_adc_port_read_raw(dev_adc_channel_t ch, dev_adc_raw_t *raw)
     ADC_ChannelConfTypeDef sConfig = {0};
     sConfig.Channel = c->stm32_channel;
     sConfig.Rank = ADC_REGULAR_RANK_1;
-    sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
-    HAL_ADC_ConfigChannel(c->handle, &sConfig);
+    (void)HAL_ADC_ConfigChannel(c->handle, &sConfig);
 
     hal = HAL_ADC_Start(c->handle);
     if (hal != HAL_OK) return stm32_map(hal);
 
-    hal = HAL_ADC_PollForConversion(c->handle, 100U);
+    hal = HAL_ADC_PollForConversion(c->handle, DEV_ADC_STM32_POLL_TIMEOUT_MS);
     if (hal != HAL_OK) { HAL_ADC_Stop(c->handle); return stm32_map(hal); }
 
     *raw = (dev_adc_raw_t)HAL_ADC_GetValue(c->handle);

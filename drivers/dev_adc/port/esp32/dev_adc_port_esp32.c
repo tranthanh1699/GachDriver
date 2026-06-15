@@ -1,4 +1,11 @@
-/* ESP32 ADC port — PLACEHOLDER STUB */
+/*
+ * ESP32 ADC port — PLACEHOLDER STUB (planned future work).
+ *
+ * Returns DEV_ERR_NOT_SUPPORTED for all operations.
+ * To complete: include "driver/adc.h", call adc_oneshot_unit_init(),
+ * adc_oneshot_config_channel(), adc_oneshot_read().
+ * See docs/dev_adc/README.md for the planned API shape.
+ */
 #include "dev_adc_port_esp32.h"
 #include "dev_common.h"
 

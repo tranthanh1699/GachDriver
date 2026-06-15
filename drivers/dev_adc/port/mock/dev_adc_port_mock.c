@@ -14,7 +14,8 @@ void dev_adc_port_mock_set_raw(dev_adc_channel_t ch, dev_adc_raw_t v)
 void dev_adc_port_mock_set_mv(dev_adc_channel_t ch, dev_adc_mv_t v)
     { if (ch < DEV_ADC_CFG_MAX_CHANNELS) { s_mv[ch] = v; s_use_mv[ch] = true; } }
 
-bool dev_adc_port_is_channel_valid(dev_adc_channel_t ch) { return (ch < DEV_ADC_CFG_MAX_CHANNELS); }
+bool dev_adc_port_is_channel_valid(dev_adc_channel_t ch)
+    { return (ch <= DEV_ADC_CURRENT_SENSE); }  /* channels 0..3 only */
 
 dev_err_t dev_adc_port_init(void)   { return s_error; }
 dev_err_t dev_adc_port_deinit(void) { return s_error; }

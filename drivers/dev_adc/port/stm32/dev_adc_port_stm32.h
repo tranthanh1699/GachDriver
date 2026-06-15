@@ -11,7 +11,8 @@ extern "C" {
  * STM32 Cube-managed ADC port.
  * Wraps Cube-generated ADC handles. No GPIO/clock/resolution init.
  */
-#define DEV_ADC_STM32_CUBE_MANAGED_HW_INIT  (1U)
+#define DEV_ADC_STM32_CUBE_MANAGED_HW_INIT   (1U)
+#define DEV_ADC_STM32_POLL_TIMEOUT_MS         (100U)
 
 #ifdef HAL_ADC_MODULE_ENABLED
 #include "stm32h7xx_hal.h"
