@@ -15,7 +15,8 @@ static uint8_t s_console_rx_buf[DEV_UART_CONSOLE_RX_BUFFER_SIZE];
 
 static dev_ringbuf_t s_rx_rings[DEV_UART_CFG_MAX_INSTANCES];
 static uint8_t       s_rx_byte[DEV_UART_CFG_MAX_INSTANCES];
-static bool          s_rx_running[DEV_UART_CFG_MAX_INSTANCES];
+static volatile bool s_rx_running[DEV_UART_CFG_MAX_INSTANCES];
+static volatile uint32_t s_rx_dropped[DEV_UART_CFG_MAX_INSTANCES];
 
 static const dev_uart_hw_t s_uart_map[DEV_UART_CFG_MAX_INSTANCES] = {
     [DEV_UART_CONSOLE] = { DEV_UART_CONSOLE, &huart1,
@@ -65,7 +66,11 @@ dev_err_t dev_uart_port_init(void)
     for (uint16_t i = 0U; i < DEV_UART_CFG_MAX_INSTANCES; i++) {
         const dev_uart_hw_t *u = &s_uart_map[i];
         if (u->handle) {
-            dev_ringbuf_init(&s_rx_rings[i], u->rx_buffer, u->rx_buffer_size);
+            s_rx_running[i] = false;
+            s_rx_dropped[i] = 0U;
+            if (dev_ringbuf_init(&s_rx_rings[i], u->rx_buffer, u->rx_buffer_size) != DEV_OK) {
+                return DEV_ERR_CONFIG;
+            }
 #if (DEV_UART_CFG_RX_BUFFER_ENABLED == 1U)
             if (HAL_UART_Receive_IT(u->handle, &s_rx_byte[i], DEV_UART_STM32_RX_TEMP_BYTE_COUNT) == HAL_OK) {
                 s_rx_running[i] = true;
@@ -121,9 +126,14 @@ dev_err_t dev_uart_port_write(dev_uart_id_t u, const uint8_t *d, uint16_t l, dev
 dev_err_t dev_uart_port_read(dev_uart_id_t u, uint8_t *data, uint16_t len,
                              uint16_t *rl, dev_uart_timeout_t to)
 {
-    const dev_uart_hw_t *h = find_uart(u);
-    if (!h) { *rl = 0U; return DEV_ERR_INVALID_ARG; }
+    if (rl == NULL) return DEV_ERR_NULL_PTR;
     *rl = 0U;
+    if (data == NULL) return DEV_ERR_NULL_PTR;
+    if (len == 0U) return DEV_ERR_INVALID_ARG;
+
+    const dev_uart_hw_t *h = find_uart(u);
+    if (!h) return DEV_ERR_INVALID_ARG;
+
     while (*rl < len) {
         uint8_t byte;
         dev_err_t e = dev_ringbuf_pop(&s_rx_rings[u], &byte);
@@ -138,7 +148,10 @@ dev_err_t dev_uart_port_read(dev_uart_id_t u, uint8_t *data, uint16_t len,
 }
 
 uint16_t dev_uart_port_rx_available(dev_uart_id_t u)
-    { return (uint16_t)dev_ringbuf_available(&s_rx_rings[u]); }
+{
+    if (!find_uart(u)) return 0U;
+    return (uint16_t)dev_ringbuf_available(&s_rx_rings[u]);
+}
 
 dev_err_t dev_uart_port_flush_rx(dev_uart_id_t u)
     { if (!find_uart(u)) return DEV_ERR_INVALID_ARG; dev_ringbuf_flush(&s_rx_rings[u]); return DEV_OK; }
@@ -167,7 +180,9 @@ void dev_uart_port_stm32_rx_cplt_callback(UART_HandleTypeDef *huart)
 {
     for (uint16_t i = 0U; i < DEV_UART_CFG_MAX_INSTANCES; i++) {
         if (huart == s_uart_map[i].handle && s_rx_running[i]) {
-            (void)dev_ringbuf_write(&s_rx_rings[i], s_rx_byte[i]);
+            if (!dev_ringbuf_try_push(&s_rx_rings[i], s_rx_byte[i])) {
+                s_rx_dropped[i]++;
+            }
             if (HAL_UART_Receive_IT(huart, &s_rx_byte[i], DEV_UART_STM32_RX_TEMP_BYTE_COUNT) != HAL_OK) {
                 s_rx_running[i] = false;
             }
@@ -176,10 +191,48 @@ void dev_uart_port_stm32_rx_cplt_callback(UART_HandleTypeDef *huart)
     }
 }
 
-/* STM32 Interrupt Handlers */
+void dev_uart_port_stm32_error_callback(UART_HandleTypeDef *huart)
+{
+    for (uint16_t i = 0U; i < DEV_UART_CFG_MAX_INSTANCES; i++) {
+        bool restart_rx;
+
+        if (huart != s_uart_map[i].handle) continue;
+
+        restart_rx = ((huart->ErrorCode & HAL_UART_ERROR_ORE) != 0U);
+        if ((huart->ErrorCode & HAL_UART_ERROR_ORE) != 0U) {
+            __HAL_UART_CLEAR_OREFLAG(huart);
+        }
+        if ((huart->ErrorCode & HAL_UART_ERROR_NE) != 0U) {
+            __HAL_UART_CLEAR_NEFLAG(huart);
+        }
+        if ((huart->ErrorCode & HAL_UART_ERROR_FE) != 0U) {
+            __HAL_UART_CLEAR_FEFLAG(huart);
+        }
+
+        huart->ErrorCode = HAL_UART_ERROR_NONE;
+        if (restart_rx) {
+            s_rx_running[i] =
+                (HAL_UART_Receive_IT(huart, &s_rx_byte[i],
+                                     DEV_UART_STM32_RX_TEMP_BYTE_COUNT) == HAL_OK);
+        }
+        return;
+    }
+}
+
+uint32_t dev_uart_port_stm32_rx_dropped(dev_uart_id_t u)
+{
+    return find_uart(u) ? s_rx_dropped[u] : 0U;
+}
+
+/* STM32 HAL callbacks */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     dev_uart_port_stm32_rx_cplt_callback(huart);
+}
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    dev_uart_port_stm32_error_callback(huart);
 }
 
 #else /* HAL_UART_MODULE_ENABLED not defined */

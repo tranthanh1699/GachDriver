@@ -39,8 +39,12 @@ typedef struct {
     uint16_t               rx_buffer_size;
 } dev_uart_hw_t;
 
-/* Port ISR dispatch — call from HAL_UART_RxCpltCallback */
+/* Port ISR dispatch — called by the HAL callbacks implemented by this port. */
 void dev_uart_port_stm32_rx_cplt_callback(UART_HandleTypeDef *huart);
+void dev_uart_port_stm32_error_callback(UART_HandleTypeDef *huart);
+
+/* Number of bytes discarded because the RX ring was full. */
+uint32_t dev_uart_port_stm32_rx_dropped(dev_uart_id_t uart);
 
 #endif /* HAL_UART_MODULE_ENABLED */
 
