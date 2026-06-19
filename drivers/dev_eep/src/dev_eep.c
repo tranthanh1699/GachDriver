@@ -632,3 +632,257 @@ bool dev_eep_is_initialized(void)
 {
     return s_initialized;
 }
+
+/* ── Raw read/write (RAM mirror) ── */
+
+dev_err_t dev_eep_read(dev_eep_id_t eep_id,
+                       dev_eep_addr_t addr,
+                       uint8_t *data,
+                       dev_eep_size_t length)
+{
+    const dev_eep_device_t *dev;
+    dev_err_t result;
+
+    if (!s_initialized)
+    {
+        return DEV_ERR_NOT_INITIALIZED;
+    }
+
+    dev = dev_eep_find_device(eep_id);
+    DEV_CHECK_RET((dev != NULL), DEV_ERR_INVALID_ARG);
+
+    DEV_CHECK_PTR_RET(data);
+
+    result = dev_eep_validate_addr(dev, addr, length);
+    DEV_CHECK_OK_RET(result);
+
+    /* Copy from RAM mirror to output buffer */
+    (void)memcpy(data, &dev->mirror[addr], (size_t)length);
+
+    return DEV_OK;
+}
+
+dev_err_t dev_eep_write(dev_eep_id_t eep_id,
+                        dev_eep_addr_t addr,
+                        const uint8_t *data,
+                        dev_eep_size_t length)
+{
+    const dev_eep_device_t *dev;
+    dev_err_t result;
+
+    if (!s_initialized)
+    {
+        return DEV_ERR_NOT_INITIALIZED;
+    }
+
+    dev = dev_eep_find_device(eep_id);
+    DEV_CHECK_RET((dev != NULL), DEV_ERR_INVALID_ARG);
+
+    DEV_CHECK_PTR_RET(data);
+
+    result = dev_eep_validate_addr(dev, addr, length);
+    DEV_CHECK_OK_RET(result);
+
+#if (DEV_EEP_CFG_WRITE_ONLY_IF_CHANGED == DEV_ON)
+    {
+        /* Compare: if identical, skip */
+        if (memcmp(&dev->mirror[addr], data, (size_t)length) == 0)
+        {
+            return DEV_OK; /* No change, no dirty marking */
+        }
+    }
+#endif
+
+    /* Copy to mirror */
+    (void)memcpy(&dev->mirror[addr], data, (size_t)length);
+
+    /* Mark dirty pages */
+    (void)dev_eep_mark_dirty(eep_id, addr, length);
+
+    return DEV_OK;
+}
+
+dev_err_t dev_eep_read_all(dev_eep_id_t eep_id)
+{
+    const dev_eep_device_t *dev;
+
+    if (!s_initialized)
+    {
+        return DEV_ERR_NOT_INITIALIZED;
+    }
+
+    dev = dev_eep_find_device(eep_id);
+    DEV_CHECK_RET((dev != NULL), DEV_ERR_INVALID_ARG);
+
+#if (DEV_EEP_CFG_MIRROR_ENABLED == DEV_ON)
+    {
+        dev_err_t result;
+
+        result = dev_eep_i2c_read(dev, 0U,
+                                  dev->mirror,
+                                  dev->total_size);
+        if (result != DEV_OK)
+        {
+            return result;
+        }
+
+        /* Clear dirty map — data is fresh from EEPROM */
+        (void)memset(dev->dirty_map, 0, (size_t)dev->dirty_map_size);
+    }
+#endif
+
+    return DEV_OK;
+}
+
+dev_err_t dev_eep_write_all(dev_eep_id_t eep_id)
+{
+    const dev_eep_device_t *dev;
+    dev_eep_size_t offset;
+    dev_eep_size_t remaining;
+    dev_eep_size_t chunk;
+    dev_err_t result;
+
+    if (!s_initialized)
+    {
+        return DEV_ERR_NOT_INITIALIZED;
+    }
+
+    dev = dev_eep_find_device(eep_id);
+    DEV_CHECK_RET((dev != NULL), DEV_ERR_INVALID_ARG);
+
+    offset    = 0U;
+    remaining = dev->total_size;
+
+    while (remaining > 0U)
+    {
+        /* Determine chunk size: up to page_size, and don't cross page boundary */
+        chunk = dev->page_size - (offset % dev->page_size);
+        if (chunk > remaining)
+        {
+            chunk = remaining;
+        }
+
+        result = dev_eep_i2c_write_page(dev, offset,
+                                        &dev->mirror[offset], chunk);
+        if (result != DEV_OK)
+        {
+            return result;
+        }
+
+        /* Wait for write cycle */
+        result = dev_eep_wait_write_cycle(dev);
+        if (result != DEV_OK)
+        {
+            return result;
+        }
+
+        offset    += chunk;
+        remaining -= chunk;
+    }
+
+#if (DEV_EEP_CFG_CRC_ENABLED == DEV_ON)
+    {
+        result = dev_eep_update_crc(dev);
+        if (result != DEV_OK)
+        {
+            return result;
+        }
+
+        /* Write CRC field to EEPROM */
+        {
+            dev_eep_size_t crc_chunk;
+            dev_eep_addr_t crc_addr = DEV_EEP_LAYOUT_CRC_OFFSET;
+
+            crc_chunk = dev->page_size - (crc_addr % dev->page_size);
+            if (crc_chunk > DEV_EEP_LAYOUT_CRC_SIZE)
+            {
+                crc_chunk = DEV_EEP_LAYOUT_CRC_SIZE;
+            }
+
+            result = dev_eep_i2c_write_page(dev, crc_addr,
+                                            &dev->mirror[crc_addr], crc_chunk);
+            if (result != DEV_OK)
+            {
+                return result;
+            }
+
+            result = dev_eep_wait_write_cycle(dev);
+            if (result != DEV_OK)
+            {
+                return result;
+            }
+        }
+    }
+#endif
+
+    /* Clear dirty map — all data written */
+    (void)memset(dev->dirty_map, 0, (size_t)dev->dirty_map_size);
+
+    return DEV_OK;
+}
+
+dev_err_t dev_eep_flush(dev_eep_id_t eep_id)
+{
+    const dev_eep_device_t *dev;
+    dev_eep_size_t page_index;
+    dev_eep_size_t page_count;
+    dev_eep_addr_t page_addr;
+    dev_eep_size_t chunk_size;
+    dev_err_t result;
+    bool any_dirty = false;
+
+    if (!s_initialized)
+    {
+        return DEV_ERR_NOT_INITIALIZED;
+    }
+
+    dev = dev_eep_find_device(eep_id);
+    DEV_CHECK_RET((dev != NULL), DEV_ERR_INVALID_ARG);
+
+    page_count = dev->total_size / dev->page_size;
+
+    for (page_index = 0U; page_index < page_count; page_index++)
+    {
+        if (!dev_eep_is_page_dirty(dev, page_index))
+        {
+            continue;
+        }
+
+        any_dirty = true;
+        page_addr = page_index * dev->page_size;
+
+        /* Determine chunk size for this page */
+        chunk_size = dev->page_size;
+        if ((page_addr + chunk_size) > dev->total_size)
+        {
+            chunk_size = dev->total_size - page_addr;
+        }
+
+        /* Write the page to EEPROM */
+        result = dev_eep_i2c_write_page(dev, page_addr,
+                                        &dev->mirror[page_addr], chunk_size);
+        if (result != DEV_OK)
+        {
+            /* Dirty bit remains set on failure */
+            return result;
+        }
+
+        /* Wait for write cycle */
+        result = dev_eep_wait_write_cycle(dev);
+        if (result != DEV_OK)
+        {
+            return result;
+        }
+
+        /* Clear dirty bit only after successful write */
+        dev_eep_clear_page_dirty(dev, page_index);
+    }
+
+    if (!any_dirty)
+    {
+        /* Nothing to flush — success */
+        return DEV_OK;
+    }
+
+    return DEV_OK;
+}
