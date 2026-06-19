@@ -2,7 +2,7 @@
 #include "dev_compiler.h"
 #include <string.h>
 
-#define MOCK_MEM_MAX       (256U)
+#define MOCK_MEM_MAX       (2048U)
 #define MOCK_MAX_DEVICES    (4U)
 
 typedef struct {
