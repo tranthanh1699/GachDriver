@@ -161,7 +161,71 @@ That's it. One callback + one table entry = new command.
 
 ---
 
-## 4. Parser Functions — Converting Arguments
+## 4. Registering a Runtime Command
+
+Runtime commands can be added at runtime without modifying `dev_shell_commands.c`. Useful when a module wants to register its own shell commands during its init.
+
+### Enable the feature
+
+```c
+#define DEV_SHELL_CFG_RUNTIME_COMMAND_ENABLED (1U)
+#define DEV_SHELL_CFG_MAX_RUNTIME_COMMANDS    (8U)
+```
+
+### Registration
+
+```c
+#include "dev_shell.h"
+
+static dev_err_t cmd_adc(uint8_t argc, char *argv[]) {
+    (void)argc; (void)argv;
+    return dev_shell_write_line("ADC command called");
+}
+
+static const dev_shell_cmd_t adc_cmd = {
+    "adc",              /* command name (must be unique) */
+    "Read ADC value",   /* help text */
+    "adc <channel>",    /* usage string */
+    cmd_adc             /* callback */
+};
+
+void app_init(void) {
+    dev_shell_init(DEV_UART_CONSOLE);
+    dev_shell_register_command(&adc_cmd);   /* register at runtime */
+}
+```
+
+### Unregistration
+
+```c
+dev_shell_unregister_command("adc");              /* remove one */
+dev_shell_unregister_all_runtime_commands();      /* remove all */
+uint16_t n = dev_shell_get_runtime_command_count(); /* count */
+```
+
+### Rules
+
+- Runtime commands are searched AFTER static commands → static has priority
+- Duplicate names rejected against both static AND runtime tables
+- Static commands CANNOT be unregistered
+- Caller must keep command strings + callback alive for registration lifetime
+- Runtime table cleared on `dev_shell_init()`
+
+### help command output
+
+```
+Built-in commands:
+  help       Show command list
+  explain    Explain shell usage
+  hello      Print Hello, World!
+
+Runtime commands:
+  adc        Read ADC value
+```
+
+---
+
+## 5. Parser Functions — Converting Arguments
 
 Your callback receives `argc` and `argv[]`. Use these parser helpers to convert string arguments to typed values:
 
@@ -214,7 +278,7 @@ static dev_err_t cmd_sensor(uint8_t argc, char *argv[])
 
 ---
 
-## 5. Configuration — All Settings in One File
+## 6. Configuration — All Settings in One File
 
 All configuration macros are in `drivers/dev_shell/include/dev_shell_cfg.h`. You only need to edit this one file.
 
@@ -287,7 +351,7 @@ gach> help
 
 ---
 
-## 6. Output Functions — Writing from Your Command
+## 7. Output Functions — Writing from Your Command
 
 Command callbacks should use these functions to send output back to the terminal:
 
@@ -306,7 +370,7 @@ Do NOT use `printf()` or `dev_uart_write()` directly in command callbacks — us
 
 ---
 
-## 7. Complete API Reference
+## 8. Complete API Reference
 
 ```c
 dev_err_t dev_shell_init(dev_uart_id_t uart_id);       /* Init shell + UART */
@@ -319,11 +383,15 @@ dev_err_t dev_shell_write_data(const uint8_t *d, uint16_t len); /* Write raw byt
 dev_err_t dev_shell_execute_line(char *line);           /* Parse and execute a line */
 dev_err_t dev_shell_find_command(const char *name, const dev_shell_cmd_t **cmd); /* Lookup */
 bool     dev_shell_is_initialized(void);                /* Check state */
+dev_err_t dev_shell_register_command(const dev_shell_cmd_t *cmd);        /* Runtime register */
+dev_err_t dev_shell_unregister_command(const char *name);                 /* Runtime unregister */
+dev_err_t dev_shell_unregister_all_runtime_commands(void);                /* Clear runtime */
+uint16_t dev_shell_get_runtime_command_count(void);                         /* Count runtime */
 ```
 
 ---
 
-## 8. Command Table Validation
+## 9. Command Table Validation
 
 At init time, `dev_shell_init()` validates the command table:
 - Rejects more than `DEV_SHELL_CFG_MAX_COMMANDS` entries
@@ -335,7 +403,7 @@ If validation fails, `dev_shell_init()` returns `DEV_ERR_CONFIG`.
 
 ---
 
-## 9. Build
+## 10. Build
 
 ```cmake
 add_subdirectory(drivers/dev_shell)
@@ -346,7 +414,7 @@ Dependencies: `dev_common`, `dev_uart`.
 
 ---
 
-## 10. Key Design Points
+## 11. Key Design Points
 
 | Rule | Why |
 |------|-----|

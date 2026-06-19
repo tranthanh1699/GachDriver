@@ -21,6 +21,12 @@ dev_err_t dev_shell_execute_line(char *line);
 dev_err_t dev_shell_find_command(const char *name, const dev_shell_cmd_t **command);
 bool     dev_shell_is_initialized(void);
 
+dev_err_t dev_shell_register_command(const dev_shell_cmd_t *command);
+dev_err_t dev_shell_unregister_command(const char *name);
+dev_err_t dev_shell_unregister_all_runtime_commands(void);
+uint16_t dev_shell_get_runtime_command_count(void);
+dev_err_t dev_shell_get_runtime_command(uint16_t index, const dev_shell_cmd_t **command);
+
 #ifdef __cplusplus
 }
 #endif

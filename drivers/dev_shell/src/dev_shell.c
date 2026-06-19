@@ -19,6 +19,11 @@ typedef struct {
 
 static dev_shell_state_t g_state;
 
+#if (DEV_SHELL_CFG_RUNTIME_COMMAND_ENABLED == 1U)
+static dev_shell_cmd_t s_runtime_commands[DEV_SHELL_CFG_MAX_RUNTIME_COMMANDS];
+static uint16_t        s_runtime_command_count;
+#endif
+
 bool dev_shell_is_initialized(void) { return g_state.initialized; }
 
 dev_err_t dev_shell_init(dev_uart_id_t uart_id)
@@ -50,6 +55,10 @@ dev_err_t dev_shell_init(dev_uart_id_t uart_id)
     }
 
     g_state.initialized = true;
+
+#if (DEV_SHELL_CFG_RUNTIME_COMMAND_ENABLED == 1U)
+    s_runtime_command_count = 0U;
+#endif
 
 #if (DEV_SHELL_CFG_PROMPT_ENABLED == 1U)
     (void)dev_shell_print_prompt();
@@ -118,14 +127,126 @@ dev_err_t dev_shell_find_command(const char *name, const dev_shell_cmd_t **comma
 {
     if (!name || !command) return DEV_ERR_NULL_PTR;
     if (!g_state.initialized) return DEV_ERR_NOT_INITIALIZED;
+
+    /* Search static table first */
     for (uint16_t i = 0U; i < g_dev_shell_command_count; i++) {
         if (strcmp(g_dev_shell_commands[i].name, name) == 0) {
             *command = &g_dev_shell_commands[i];
             return DEV_OK;
         }
     }
+
+    /* Search runtime table second */
+#if (DEV_SHELL_CFG_RUNTIME_COMMAND_ENABLED == 1U)
+    for (uint16_t i = 0U; i < s_runtime_command_count; i++) {
+        if (strcmp(s_runtime_commands[i].name, name) == 0) {
+            *command = &s_runtime_commands[i];
+            return DEV_OK;
+        }
+    }
+#endif
+
     return DEV_ERR_NOT_FOUND;
 }
+
+/* ── Runtime command registration ── */
+
+#if (DEV_SHELL_CFG_RUNTIME_COMMAND_ENABLED == 1U)
+
+static bool dev_shell_is_valid_cmd_name(const char *name)
+{
+    size_t i;
+    if (!name || name[0] == '\0') return false;
+    for (i = 0U; name[i] != '\0'; i++) {
+        unsigned char c = (unsigned char)name[i];
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') return false;
+    }
+    return true;
+}
+
+static bool dev_shell_cmd_exists_static(const char *name)
+{
+    for (uint16_t i = 0U; i < g_dev_shell_command_count; i++)
+        if (strcmp(g_dev_shell_commands[i].name, name) == 0) return true;
+    return false;
+}
+
+static bool dev_shell_cmd_exists_runtime(const char *name)
+{
+    for (uint16_t i = 0U; i < s_runtime_command_count; i++)
+        if (strcmp(s_runtime_commands[i].name, name) == 0) return true;
+    return false;
+}
+
+dev_err_t dev_shell_register_command(const dev_shell_cmd_t *cmd)
+{
+    if (!g_state.initialized) return DEV_ERR_NOT_INITIALIZED;
+    if (!cmd) return DEV_ERR_NULL_PTR;
+    if (!cmd->name) return DEV_ERR_NULL_PTR;
+    if (!cmd->help || !cmd->usage || !cmd->function) return DEV_ERR_NULL_PTR;
+    if (!dev_shell_is_valid_cmd_name(cmd->name)) return DEV_ERR_INVALID_ARG;
+
+    if (dev_shell_cmd_exists_static(cmd->name))  return DEV_ERR_CONFIG;
+    if (dev_shell_cmd_exists_runtime(cmd->name)) return DEV_ERR_CONFIG;
+
+    if (s_runtime_command_count >= DEV_SHELL_CFG_MAX_RUNTIME_COMMANDS)
+        return DEV_ERR_OVERFLOW;
+
+    s_runtime_commands[s_runtime_command_count] = *cmd;
+    s_runtime_command_count++;
+    return DEV_OK;
+}
+
+dev_err_t dev_shell_unregister_command(const char *name)
+{
+    uint16_t i;
+    bool found = false;
+
+    if (!g_state.initialized) return DEV_ERR_NOT_INITIALIZED;
+    if (!name) return DEV_ERR_NULL_PTR;
+
+    if (dev_shell_cmd_exists_static(name)) return DEV_ERR_CONFIG;
+
+    for (i = 0U; i < s_runtime_command_count; i++) {
+        if (strcmp(s_runtime_commands[i].name, name) == 0) { found = true; break; }
+    }
+    if (!found) return DEV_ERR_NOT_FOUND;
+
+    /* Compact: shift remaining entries left, clear stale slot */
+    for (; i < s_runtime_command_count - 1U; i++)
+        s_runtime_commands[i] = s_runtime_commands[i + 1U];
+    memset(&s_runtime_commands[s_runtime_command_count - 1U], 0,
+           sizeof(s_runtime_commands[0]));
+    s_runtime_command_count--;
+    return DEV_OK;
+}
+
+dev_err_t dev_shell_unregister_all_runtime_commands(void)
+{
+    if (!g_state.initialized) return DEV_ERR_NOT_INITIALIZED;
+    s_runtime_command_count = 0U;
+    return DEV_OK;
+}
+
+uint16_t dev_shell_get_runtime_command_count(void) { return s_runtime_command_count; }
+
+/* Private: used by help command to enumerate runtime entries */
+const dev_shell_cmd_t *dev_shell_private_get_runtime_cmd(uint16_t index)
+    { return (index < s_runtime_command_count) ? &s_runtime_commands[index] : NULL; }
+
+#else /* RUNTIME_COMMAND_ENABLED == 0U */
+
+dev_err_t dev_shell_register_command(const dev_shell_cmd_t *cmd)
+    { DEV_UNUSED(cmd); return DEV_ERR_NOT_SUPPORTED; }
+dev_err_t dev_shell_unregister_command(const char *name)
+    { DEV_UNUSED(name); return DEV_ERR_NOT_SUPPORTED; }
+dev_err_t dev_shell_unregister_all_runtime_commands(void)
+    { return DEV_ERR_NOT_SUPPORTED; }
+uint16_t dev_shell_get_runtime_command_count(void) { return 0U; }
+const dev_shell_cmd_t *dev_shell_private_get_runtime_cmd(uint16_t index)
+    { DEV_UNUSED(index); return NULL; }
+
+#endif
 
 dev_err_t dev_shell_execute_line(char *line)
 {

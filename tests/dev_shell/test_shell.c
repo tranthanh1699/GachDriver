@@ -67,6 +67,32 @@ TEST(17_find_null) { const dev_shell_cmd_t *c; EQ(dev_shell_find_command(NULL, &
 /* 18: handle no data */
 TEST(18_handle_empty) { EQ(dev_shell_init(DEV_UART_CONSOLE), DEV_OK, "init"); EQ(dev_shell_handle(), DEV_OK, "empty"); printf("    PASS\n"); g_passes++; }
 
+/* ── Runtime command tests ── */
+
+static dev_err_t rt_cmd_fn(uint8_t argc, char *argv[]) { (void)argc; (void)argv; return DEV_OK; }
+static const dev_shell_cmd_t rt_cmd = { "adc", "Read ADC", "adc <ch>", rt_cmd_fn };
+
+TEST(19_reg_ok)      { EQ(dev_shell_init(DEV_UART_CONSOLE), DEV_OK, "init"); EQ(dev_shell_register_command(&rt_cmd), DEV_OK, "reg"); printf("    PASS\n"); g_passes++; }
+TEST(20_reg_null)    { EQ(dev_shell_init(DEV_UART_CONSOLE), DEV_OK, "init"); EQ(dev_shell_register_command(NULL), DEV_ERR_NULL_PTR, "null"); printf("    PASS\n"); g_passes++; }
+TEST(21_null_name)   { EQ(dev_shell_init(DEV_UART_CONSOLE), DEV_OK, "init"); dev_shell_cmd_t c={NULL, "h", "u", rt_cmd_fn}; EQ(dev_shell_register_command(&c), DEV_ERR_NULL_PTR, "null name"); printf("    PASS\n"); g_passes++; }
+TEST(22_empty_name)  { EQ(dev_shell_init(DEV_UART_CONSOLE), DEV_OK, "init"); dev_shell_cmd_t c={"", "h", "u", rt_cmd_fn}; EQ(dev_shell_register_command(&c), DEV_ERR_INVALID_ARG, "empty"); printf("    PASS\n"); g_passes++; }
+TEST(23_space_name)  { EQ(dev_shell_init(DEV_UART_CONSOLE), DEV_OK, "init"); dev_shell_cmd_t c={"ab c", "h", "u", rt_cmd_fn}; EQ(dev_shell_register_command(&c), DEV_ERR_INVALID_ARG, "spc"); printf("    PASS\n"); g_passes++; }
+TEST(24_tab_name)    { EQ(dev_shell_init(DEV_UART_CONSOLE), DEV_OK, "init"); dev_shell_cmd_t c={"ab\tc", "h", "u", rt_cmd_fn}; EQ(dev_shell_register_command(&c), DEV_ERR_INVALID_ARG, "tab"); printf("    PASS\n"); g_passes++; }
+TEST(25_null_fn)     { EQ(dev_shell_init(DEV_UART_CONSOLE), DEV_OK, "init"); dev_shell_cmd_t c={"x", "h", "u", NULL}; EQ(dev_shell_register_command(&c), DEV_ERR_NULL_PTR, "fn"); printf("    PASS\n"); g_passes++; }
+TEST(26_dup_static)  { EQ(dev_shell_init(DEV_UART_CONSOLE), DEV_OK, "init"); dev_shell_cmd_t c={"help", "h", "u", rt_cmd_fn}; EQ(dev_shell_register_command(&c), DEV_ERR_CONFIG, "dup static"); printf("    PASS\n"); g_passes++; }
+TEST(27_dup_runtime) { EQ(dev_shell_init(DEV_UART_CONSOLE), DEV_OK, "init"); EQ(dev_shell_register_command(&rt_cmd), DEV_OK, "1st"); EQ(dev_shell_register_command(&rt_cmd), DEV_ERR_CONFIG, "2nd"); printf("    PASS\n"); g_passes++; }
+TEST(28_exec_runtime){ EQ(dev_shell_init(DEV_UART_CONSOLE), DEV_OK, "init"); EQ(dev_shell_register_command(&rt_cmd), DEV_OK, "reg"); const dev_shell_cmd_t *c; EQ(dev_shell_find_command("adc", &c), DEV_OK, "find"); EQ(c->function(0,NULL), DEV_OK, "exec"); printf("    PASS\n"); g_passes++; }
+TEST(29_priority)    { EQ(dev_shell_init(DEV_UART_CONSOLE), DEV_OK, "init"); dev_shell_cmd_t c={"help", "h", "u", rt_cmd_fn}; EQ(dev_shell_register_command(&c), DEV_ERR_CONFIG, "dup"); const dev_shell_cmd_t *f; EQ(dev_shell_find_command("help", &f), DEV_OK, "find"); CHK(f->function != rt_cmd_fn, "static wins"); printf("    PASS\n"); g_passes++; }
+TEST(30_unreg)       { EQ(dev_shell_init(DEV_UART_CONSOLE), DEV_OK, "init"); EQ(dev_shell_register_command(&rt_cmd), DEV_OK, "reg"); EQ(dev_shell_unregister_command("adc"), DEV_OK, "unreg"); printf("    PASS\n"); g_passes++; }
+TEST(31_unreg_nf)    { EQ(dev_shell_init(DEV_UART_CONSOLE), DEV_OK, "init"); EQ(dev_shell_unregister_command("nonexist"), DEV_ERR_NOT_FOUND, "nf"); printf("    PASS\n"); g_passes++; }
+TEST(32_unreg_static){ EQ(dev_shell_init(DEV_UART_CONSOLE), DEV_OK, "init"); EQ(dev_shell_unregister_command("help"), DEV_ERR_CONFIG, "static"); printf("    PASS\n"); g_passes++; }
+TEST(33_unreg_all)   { EQ(dev_shell_init(DEV_UART_CONSOLE), DEV_OK, "init"); EQ(dev_shell_register_command(&rt_cmd), DEV_OK, "reg"); EQ(dev_shell_unregister_all_runtime_commands(), DEV_OK, "all"); EQ(dev_shell_get_runtime_command_count(), 0U, "0"); printf("    PASS\n"); g_passes++; }
+TEST(34_compact)     { EQ(dev_shell_init(DEV_UART_CONSOLE), DEV_OK, "init"); dev_shell_cmd_t a={"a","h","u",rt_cmd_fn}; dev_shell_cmd_t b={"b","h","u",rt_cmd_fn}; dev_shell_cmd_t c={"c","h","u",rt_cmd_fn}; EQ(dev_shell_register_command(&a), DEV_OK, "a"); EQ(dev_shell_register_command(&b), DEV_OK, "b"); EQ(dev_shell_register_command(&c), DEV_OK, "c"); EQ(dev_shell_unregister_command("b"), DEV_OK, "unreg b"); const dev_shell_cmd_t *f; EQ(dev_shell_find_command("c", &f), DEV_OK, "c found"); printf("    PASS\n"); g_passes++; }
+
+#if (DEV_SHELL_CFG_MAX_RUNTIME_COMMANDS < 32U)
+TEST(35_fill_table)  { EQ(dev_shell_init(DEV_UART_CONSOLE), DEV_OK, "init"); char nm[32][3]={"a0","a1","a2","a3","a4","a5","a6","a7","a8","a9","b0","b1","b2","b3","b4","b5","b6","b7","b8","b9","c0","c1","c2","c3","c4","c5","c6","c7","c8","c9","d0","d1"}; dev_shell_cmd_t c={"a0","h","u",rt_cmd_fn}; uint16_t n=0U; while(n<DEV_SHELL_CFG_MAX_RUNTIME_COMMANDS){c.name=nm[n]; EQ(dev_shell_register_command(&c),DEV_OK,"add");n++;} EQ(dev_shell_register_command(&rt_cmd),DEV_ERR_OVERFLOW,"full"); EQ(dev_shell_unregister_all_runtime_commands(),DEV_OK,"clr"); printf("    PASS\n"); g_passes++; }
+#endif
+
 int main(void)
 {
     printf("=== dev_shell Test Suite ===\n\n");
@@ -75,6 +101,13 @@ int main(void)
     RUN(9_unknown); RUN(10_parse);
     RUN(11_arg_u32); RUN(12_arg_i32); RUN(13_arg_hex); RUN(14_arg_bool);
     RUN(15_bad_parse); RUN(16_null_ptr); RUN(17_find_null); RUN(18_handle_empty);
+    RUN(19_reg_ok); RUN(20_reg_null); RUN(21_null_name); RUN(22_empty_name);
+    RUN(23_space_name); RUN(24_tab_name); RUN(25_null_fn); RUN(26_dup_static);
+    RUN(27_dup_runtime); RUN(28_exec_runtime); RUN(29_priority); RUN(30_unreg);
+    RUN(31_unreg_nf); RUN(32_unreg_static); RUN(33_unreg_all); RUN(34_compact);
+#if (DEV_SHELL_CFG_MAX_RUNTIME_COMMANDS < 32U)
+    RUN(35_fill_table);
+#endif
     printf("\n=== Results: %d passed, %d failed ===\n", g_passes, g_failures);
     return (g_failures > 0) ? 1 : 0;
 }
