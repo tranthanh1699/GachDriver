@@ -396,16 +396,50 @@ static dev_err_t dev_eep_wait_write_cycle(const dev_eep_device_t *dev)
 
 static dev_err_t dev_eep_update_crc(const dev_eep_device_t *dev)
 {
-    /* Will be implemented in Task 12 */
-    (void)dev;
-    return DEV_ERR_NOT_SUPPORTED;
+    uint16_t crc_value;
+    dev_err_t result;
+
+    DEV_CHECK_RET((dev != NULL), DEV_ERR_NULL_PTR);
+
+    /* Compute CRC-16 over the defined CRC region (excludes CRC field itself) */
+    result = dev_crc16_compute(&dev->mirror[DEV_EEP_CRC_START_OFFSET],
+                               (size_t)DEV_EEP_CRC_DATA_LENGTH,
+                               &crc_value);
+    DEV_CHECK_OK_RET(result);
+
+    /* Write CRC value into mirror at CRC field offset */
+    (void)memcpy(&dev->mirror[DEV_EEP_LAYOUT_CRC_OFFSET],
+                 &crc_value,
+                 DEV_EEP_LAYOUT_CRC_SIZE);
+
+    return DEV_OK;
 }
 
 static dev_err_t dev_eep_check_crc(const dev_eep_device_t *dev)
 {
-    /* Will be implemented in Task 12 */
-    (void)dev;
-    return DEV_ERR_NOT_SUPPORTED;
+    uint16_t computed_crc;
+    uint16_t stored_crc;
+    dev_err_t result;
+
+    DEV_CHECK_RET((dev != NULL), DEV_ERR_NULL_PTR);
+
+    /* Compute CRC-16 over the defined CRC region */
+    result = dev_crc16_compute(&dev->mirror[DEV_EEP_CRC_START_OFFSET],
+                               (size_t)DEV_EEP_CRC_DATA_LENGTH,
+                               &computed_crc);
+    DEV_CHECK_OK_RET(result);
+
+    /* Read stored CRC from mirror */
+    (void)memcpy(&stored_crc,
+                 &dev->mirror[DEV_EEP_LAYOUT_CRC_OFFSET],
+                 DEV_EEP_LAYOUT_CRC_SIZE);
+
+    if (computed_crc != stored_crc)
+    {
+        return DEV_ERR_CRC;
+    }
+
+    return DEV_OK;
 }
 
 static void dev_eep_load_defaults(const dev_eep_device_t *dev)
@@ -885,4 +919,211 @@ dev_err_t dev_eep_flush(dev_eep_id_t eep_id)
     }
 
     return DEV_OK;
+}
+
+/* ── Field-based read/write ── */
+
+dev_err_t dev_eep_read_field(dev_eep_field_id_t field_id,
+                             void *data,
+                             dev_eep_size_t length)
+{
+    const dev_eep_field_t *field;
+    const dev_eep_device_t *dev;
+
+    if (!s_initialized)
+    {
+        return DEV_ERR_NOT_INITIALIZED;
+    }
+
+    DEV_CHECK_PTR_RET(data);
+
+    field = dev_eep_find_field(field_id);
+    DEV_CHECK_RET((field != NULL), DEV_ERR_INVALID_ARG);
+
+    if (length != field->size)
+    {
+        return DEV_ERR_INVALID_ARG;
+    }
+
+    /* Use DEV_EEP_MAIN as the default device */
+    dev = dev_eep_find_device(DEV_EEP_MAIN);
+    DEV_CHECK_RET((dev != NULL), DEV_ERR_CONFIG);
+
+    /* Read from mirror */
+    (void)memcpy(data, &dev->mirror[field->offset], (size_t)field->size);
+
+    return DEV_OK;
+}
+
+dev_err_t dev_eep_write_field(dev_eep_field_id_t field_id,
+                              const void *data,
+                              dev_eep_size_t length)
+{
+    const dev_eep_field_t *field;
+    const dev_eep_device_t *dev;
+
+    if (!s_initialized)
+    {
+        return DEV_ERR_NOT_INITIALIZED;
+    }
+
+    DEV_CHECK_PTR_RET(data);
+
+    field = dev_eep_find_field(field_id);
+    DEV_CHECK_RET((field != NULL), DEV_ERR_INVALID_ARG);
+
+    if (length != field->size)
+    {
+        return DEV_ERR_INVALID_ARG;
+    }
+
+    /* Use DEV_EEP_MAIN as the default device */
+    dev = dev_eep_find_device(DEV_EEP_MAIN);
+    DEV_CHECK_RET((dev != NULL), DEV_ERR_CONFIG);
+
+    /* Delegate to raw write (which does compare-before-write + dirty tracking) */
+    return dev_eep_write(DEV_EEP_MAIN, field->offset,
+                         (const uint8_t *)data, field->size);
+}
+
+dev_err_t dev_eep_get_field_info(dev_eep_field_id_t field_id,
+                                 const dev_eep_field_t **field)
+{
+    DEV_CHECK_PTR_RET(field);
+
+    *field = dev_eep_find_field(field_id);
+    DEV_CHECK_RET(((*field) != NULL), DEV_ERR_INVALID_ARG);
+
+    return DEV_OK;
+}
+
+/* ── Typed read/write ── */
+
+dev_err_t dev_eep_read_u8(dev_eep_field_id_t field_id, uint8_t *value)
+{
+    DEV_CHECK_PTR_RET(value);
+    return dev_eep_read_field(field_id, (void *)value, (dev_eep_size_t)sizeof(uint8_t));
+}
+
+dev_err_t dev_eep_write_u8(dev_eep_field_id_t field_id, uint8_t value)
+{
+    return dev_eep_write_field(field_id, (const void *)&value, (dev_eep_size_t)sizeof(uint8_t));
+}
+
+dev_err_t dev_eep_read_u16(dev_eep_field_id_t field_id, uint16_t *value)
+{
+    DEV_CHECK_PTR_RET(value);
+    return dev_eep_read_field(field_id, (void *)value, (dev_eep_size_t)sizeof(uint16_t));
+}
+
+dev_err_t dev_eep_write_u16(dev_eep_field_id_t field_id, uint16_t value)
+{
+    return dev_eep_write_field(field_id, (const void *)&value, (dev_eep_size_t)sizeof(uint16_t));
+}
+
+dev_err_t dev_eep_read_u32(dev_eep_field_id_t field_id, uint32_t *value)
+{
+    DEV_CHECK_PTR_RET(value);
+    return dev_eep_read_field(field_id, (void *)value, (dev_eep_size_t)sizeof(uint32_t));
+}
+
+dev_err_t dev_eep_write_u32(dev_eep_field_id_t field_id, uint32_t value)
+{
+    return dev_eep_write_field(field_id, (const void *)&value, (dev_eep_size_t)sizeof(uint32_t));
+}
+
+/* ── Dirty state ── */
+
+bool dev_eep_is_dirty(dev_eep_id_t eep_id)
+{
+    const dev_eep_device_t *dev;
+    dev_eep_size_t page_index;
+    dev_eep_size_t page_count;
+
+    dev = dev_eep_find_device(eep_id);
+    if (dev == NULL)
+    {
+        return false;
+    }
+
+    page_count = dev->total_size / dev->page_size;
+
+    for (page_index = 0U; page_index < page_count; page_index++)
+    {
+        if (dev_eep_is_page_dirty(dev, page_index))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+dev_err_t dev_eep_mark_dirty(dev_eep_id_t eep_id,
+                             dev_eep_addr_t addr,
+                             dev_eep_size_t length)
+{
+    const dev_eep_device_t *dev;
+    dev_eep_size_t start_page;
+    dev_eep_size_t end_page;
+    dev_eep_size_t page;
+    dev_err_t result;
+
+    dev = dev_eep_find_device(eep_id);
+    DEV_CHECK_RET((dev != NULL), DEV_ERR_INVALID_ARG);
+
+    result = dev_eep_validate_addr(dev, addr, length);
+    DEV_CHECK_OK_RET(result);
+
+#if (DEV_EEP_CFG_DIRTY_TRACKING_ENABLED == DEV_ON)
+    {
+        start_page = dev_eep_addr_to_page(dev, addr);
+        end_page   = dev_eep_addr_to_page(dev, addr + length - 1U);
+
+        for (page = start_page; page <= end_page; page++)
+        {
+            dev_eep_set_page_dirty(dev, page);
+        }
+    }
+#endif
+
+    return DEV_OK;
+}
+
+dev_err_t dev_eep_clear_dirty(dev_eep_id_t eep_id)
+{
+    const dev_eep_device_t *dev;
+
+    dev = dev_eep_find_device(eep_id);
+    DEV_CHECK_RET((dev != NULL), DEV_ERR_INVALID_ARG);
+
+    (void)memset(dev->dirty_map, 0, (size_t)dev->dirty_map_size);
+
+    return DEV_OK;
+}
+
+uint16_t dev_eep_get_dirty_page_count(dev_eep_id_t eep_id)
+{
+    const dev_eep_device_t *dev;
+    dev_eep_size_t page_index;
+    dev_eep_size_t page_count;
+    uint16_t count = 0U;
+
+    dev = dev_eep_find_device(eep_id);
+    if (dev == NULL)
+    {
+        return 0U;
+    }
+
+    page_count = dev->total_size / dev->page_size;
+
+    for (page_index = 0U; page_index < page_count; page_index++)
+    {
+        if (dev_eep_is_page_dirty(dev, page_index))
+        {
+            count++;
+        }
+    }
+
+    return count;
 }
