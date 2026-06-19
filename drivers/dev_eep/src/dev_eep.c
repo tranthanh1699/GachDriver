@@ -535,14 +535,18 @@ dev_err_t dev_eep_init(void)
         (void)memset(dev->dirty_map, 0, (size_t)dev->dirty_map_size);
     }
 
-    /* Read all EEPROM data into RAM mirror */
+    /* Read all EEPROM data into RAM mirror.
+     * Set initialized before reading so internal helpers that check
+     * s_initialized (e.g. dev_eep_read_all) can operate during init. */
 #if (DEV_EEP_CFG_AUTO_READ_ALL_ON_INIT == DEV_ON)
+    s_initialized = true;
     {
         for (i = 0U; i < DEV_EEP_CFG_MAX_DEVICES; i++)
         {
             result = dev_eep_read_all(s_devices[i].eep_id);
             if (result != DEV_OK)
             {
+                s_initialized = false;
                 return result;
             }
         }
@@ -568,6 +572,7 @@ dev_err_t dev_eep_init(void)
                 dev_eep_load_defaults(dev);
                 continue;
 #else
+                s_initialized = false;
                 return DEV_ERR_CRC;
 #endif
             }
@@ -580,6 +585,7 @@ dev_err_t dev_eep_init(void)
                 dev_eep_load_defaults(dev);
                 continue;
 #else
+                s_initialized = false;
                 return DEV_ERR_CRC;
 #endif
             }
@@ -940,7 +946,8 @@ dev_err_t dev_eep_read_field(dev_eep_field_id_t field_id,
     field = dev_eep_find_field(field_id);
     DEV_CHECK_RET((field != NULL), DEV_ERR_INVALID_ARG);
 
-    if (length != field->size)
+    /* Allow reading fewer bytes than the field size (partial field read) */
+    if (length > field->size)
     {
         return DEV_ERR_INVALID_ARG;
     }
@@ -949,8 +956,8 @@ dev_err_t dev_eep_read_field(dev_eep_field_id_t field_id,
     dev = dev_eep_find_device(DEV_EEP_MAIN);
     DEV_CHECK_RET((dev != NULL), DEV_ERR_CONFIG);
 
-    /* Read from mirror */
-    (void)memcpy(data, &dev->mirror[field->offset], (size_t)field->size);
+    /* Read from mirror (use caller-provided length to avoid buffer overrun) */
+    (void)memcpy(data, &dev->mirror[field->offset], (size_t)((length < field->size) ? length : field->size));
 
     return DEV_OK;
 }
@@ -972,7 +979,8 @@ dev_err_t dev_eep_write_field(dev_eep_field_id_t field_id,
     field = dev_eep_find_field(field_id);
     DEV_CHECK_RET((field != NULL), DEV_ERR_INVALID_ARG);
 
-    if (length != field->size)
+    /* Allow writing fewer bytes than the field size (partial field write) */
+    if (length > field->size)
     {
         return DEV_ERR_INVALID_ARG;
     }
@@ -981,9 +989,9 @@ dev_err_t dev_eep_write_field(dev_eep_field_id_t field_id,
     dev = dev_eep_find_device(DEV_EEP_MAIN);
     DEV_CHECK_RET((dev != NULL), DEV_ERR_CONFIG);
 
-    /* Delegate to raw write (which does compare-before-write + dirty tracking) */
+    /* Delegate to raw write with caller-provided length */
     return dev_eep_write(DEV_EEP_MAIN, field->offset,
-                         (const uint8_t *)data, field->size);
+                         (const uint8_t *)data, length);
 }
 
 dev_err_t dev_eep_get_field_info(dev_eep_field_id_t field_id,
