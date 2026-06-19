@@ -8,8 +8,8 @@ extern "C" {
 #include "dev_uart_types.h"
 
 #define DEV_UART_CFG_MAX_INSTANCES             (1U)
-#define DEV_UART_CFG_RUNTIME_CHECK_ENABLED     (1U)
-#define DEV_UART_CFG_RX_BUFFER_ENABLED         (1U)
+#define DEV_UART_CFG_RUNTIME_CHECK_ENABLED     DEV_ON
+#define DEV_UART_CFG_RX_BUFFER_ENABLED         DEV_ON
 
 #define DEV_UART_TIMEOUT_DEFAULT_MS            (100U)
 #define DEV_UART_TIMEOUT_NO_WAIT               (0U)

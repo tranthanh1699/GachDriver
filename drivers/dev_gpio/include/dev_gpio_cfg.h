@@ -10,8 +10,8 @@ extern "C" {
 /* ── Global config ── */
 
 #define DEV_GPIO_CFG_MAX_PINS              (32U)
-#define DEV_GPIO_CFG_INTERRUPT_ENABLED     (1U)
-#define DEV_GPIO_CFG_RUNTIME_CHECK_ENABLED (1U)
+#define DEV_GPIO_CFG_INTERRUPT_ENABLED     DEV_ON
+#define DEV_GPIO_CFG_RUNTIME_CHECK_ENABLED DEV_ON
 
 /*
  * X-Macro: define ALL pins here — ONE line per pin.

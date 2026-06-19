@@ -5,6 +5,9 @@
 extern "C" {
 #endif
 
+#define DEV_ON                       (1U)
+#define DEV_OFF                      (0U)
+
 #define DEV_UNUSED(x)                ((void)(x))
 #define DEV_ARRAY_SIZE(a)            (sizeof(a) / sizeof((a)[0]))
 #define DEV_STATIC_ASSERT(cond, msg) _Static_assert((cond), msg)
