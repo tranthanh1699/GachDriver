@@ -5,6 +5,10 @@
 #include "dev_common.h"
 #include <string.h>
 
+/* Maximum internal buffer size for I2C write operations:
+ * largest page size + maximum memory address bytes (4) */
+#define DEV_EEP_MAX_BUF_SIZE (DEV_EEP_MAIN_PAGE_SIZE + 4U)
+
 /* ── Static RAM buffers ── */
 
 static uint8_t s_eep_main_mirror[DEV_EEP_MAIN_TOTAL_SIZE];
@@ -321,7 +325,7 @@ static dev_err_t dev_eep_i2c_write_page(const dev_eep_device_t *dev,
     else
     {
         /* 24-bit or 32-bit: buffer address + data into single write */
-        uint8_t buf[128U]; /* max page size + 4 bytes address */
+        uint8_t buf[DEV_EEP_MAX_BUF_SIZE];
         uint8_t addr_len;
 
         if (dev->mem_addr_size == DEV_EEP_MEM_ADDR_SIZE_24BIT)
@@ -566,29 +570,35 @@ dev_err_t dev_eep_init(void)
                          &dev->mirror[DEV_EEP_LAYOUT_MAGIC_OFFSET],
                          DEV_EEP_LAYOUT_MAGIC_SIZE);
 
+#if (DEV_EEP_CFG_LOAD_DEFAULTS_ON_INVALID_CRC == DEV_ON)
             if (mirror_magic != DEV_EEP_MAGIC_VALUE)
             {
-#if (DEV_EEP_CFG_LOAD_DEFAULTS_ON_INVALID_CRC == DEV_ON)
                 dev_eep_load_defaults(dev);
-                continue;
+            }
+            else
+            {
+                /* Check CRC */
+                result = dev_eep_check_crc(dev);
+                if (result != DEV_OK)
+                {
+                    dev_eep_load_defaults(dev);
+                }
+            }
 #else
+            if (mirror_magic != DEV_EEP_MAGIC_VALUE)
+            {
                 s_initialized = false;
                 return DEV_ERR_CRC;
-#endif
             }
 
             /* Check CRC */
             result = dev_eep_check_crc(dev);
             if (result != DEV_OK)
             {
-#if (DEV_EEP_CFG_LOAD_DEFAULTS_ON_INVALID_CRC == DEV_ON)
-                dev_eep_load_defaults(dev);
-                continue;
-#else
                 s_initialized = false;
                 return DEV_ERR_CRC;
-#endif
             }
+#endif
         }
     }
 #endif
@@ -621,19 +631,22 @@ dev_err_t dev_eep_shutdown(void)
                 {
                     first_error = result;
                 }
-                continue;
+            }
+            else
+            {
+#endif
+                result = dev_eep_flush(s_devices[i].eep_id);
+                if (result != DEV_OK)
+                {
+                    if (first_error == DEV_OK)
+                    {
+                        first_error = result;
+                    }
+                    /* Don't clear initialized state on partial failure */
+                }
+#if (DEV_EEP_CFG_CRC_ENABLED == DEV_ON)
             }
 #endif
-            result = dev_eep_flush(s_devices[i].eep_id);
-            if (result != DEV_OK)
-            {
-                if (first_error == DEV_OK)
-                {
-                    first_error = result;
-                }
-                /* Don't clear initialized state on partial failure */
-                continue;
-            }
         }
 
         if (first_error != DEV_OK)
@@ -883,39 +896,37 @@ dev_err_t dev_eep_flush(dev_eep_id_t eep_id)
 
     for (page_index = 0U; page_index < page_count; page_index++)
     {
-        if (!dev_eep_is_page_dirty(dev, page_index))
+        if (dev_eep_is_page_dirty(dev, page_index))
         {
-            continue;
+            any_dirty = true;
+            page_addr = page_index * dev->page_size;
+
+            /* Determine chunk size for this page */
+            chunk_size = dev->page_size;
+            if ((page_addr + chunk_size) > dev->total_size)
+            {
+                chunk_size = dev->total_size - page_addr;
+            }
+
+            /* Write the page to EEPROM */
+            result = dev_eep_i2c_write_page(dev, page_addr,
+                                            &dev->mirror[page_addr], chunk_size);
+            if (result != DEV_OK)
+            {
+                /* Dirty bit remains set on failure */
+                return result;
+            }
+
+            /* Wait for write cycle */
+            result = dev_eep_wait_write_cycle(dev);
+            if (result != DEV_OK)
+            {
+                return result;
+            }
+
+            /* Clear dirty bit only after successful write */
+            dev_eep_clear_page_dirty(dev, page_index);
         }
-
-        any_dirty = true;
-        page_addr = page_index * dev->page_size;
-
-        /* Determine chunk size for this page */
-        chunk_size = dev->page_size;
-        if ((page_addr + chunk_size) > dev->total_size)
-        {
-            chunk_size = dev->total_size - page_addr;
-        }
-
-        /* Write the page to EEPROM */
-        result = dev_eep_i2c_write_page(dev, page_addr,
-                                        &dev->mirror[page_addr], chunk_size);
-        if (result != DEV_OK)
-        {
-            /* Dirty bit remains set on failure */
-            return result;
-        }
-
-        /* Wait for write cycle */
-        result = dev_eep_wait_write_cycle(dev);
-        if (result != DEV_OK)
-        {
-            return result;
-        }
-
-        /* Clear dirty bit only after successful write */
-        dev_eep_clear_page_dirty(dev, page_index);
     }
 
     if (!any_dirty)
@@ -957,7 +968,7 @@ dev_err_t dev_eep_read_field(dev_eep_field_id_t field_id,
     DEV_CHECK_RET((dev != NULL), DEV_ERR_CONFIG);
 
     /* Read from mirror (use caller-provided length to avoid buffer overrun) */
-    (void)memcpy(data, &dev->mirror[field->offset], (size_t)((length < field->size) ? length : field->size));
+    (void)memcpy(data, &dev->mirror[field->offset], (size_t)length);
 
     return DEV_OK;
 }
