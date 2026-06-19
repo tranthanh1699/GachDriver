@@ -3,8 +3,8 @@
 #include <string.h>
 #include "dev_log.h"
 
-uint8_t g_uart_id = 0;
-
+static uint8_t g_uart_id = 0;
+static bool g_log_initialized = false;
 void dev_log_init(uint8_t uart_id)
 {
     if (!dev_uart_is_valid((dev_uart_id_t)uart_id)) return;
@@ -14,9 +14,11 @@ void dev_log_init(uint8_t uart_id)
     if (!dev_uart_is_initialized()) {
         dev_uart_init();
     }
+    g_log_initialized = true;
 }
 void dev_log(const char* str, ...)
 {
+    if (!g_log_initialized) return;
     char log_buffer[512];
     va_list args;
     va_start(args, str);
@@ -31,6 +33,7 @@ void dev_log(const char* str, ...)
 
 void dev_log_hex(const uint8_t* data, uint32_t length)
 {
+    if (!g_log_initialized) return;
     char hex_buf[1024];
     int hex_idx = 0;
     dev_log("Hex Dump - Length: %d\r\n", length);
