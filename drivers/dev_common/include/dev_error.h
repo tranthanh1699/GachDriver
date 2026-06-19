@@ -26,7 +26,8 @@ typedef enum {
     DEV_ERR_OVERFLOW,
     DEV_ERR_EMPTY,
     DEV_ERR_NOT_FOUND,
-    DEV_ERR_PARSE
+    DEV_ERR_PARSE,
+    DEV_ERR_CRC
 } dev_err_t;
 
 #ifdef __cplusplus
