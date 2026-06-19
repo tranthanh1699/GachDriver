@@ -226,16 +226,67 @@ static dev_eep_size_t dev_eep_addr_to_page(const dev_eep_device_t *dev,
     return (addr / dev->page_size);
 }
 
-/* ── Stub implementations (filled in later tasks) ── */
+/* ── I2C communication helpers ── */
 
 static dev_err_t dev_eep_i2c_read(const dev_eep_device_t *dev,
                                   dev_eep_addr_t addr,
                                   uint8_t *data,
                                   dev_eep_size_t length)
 {
-    /* Will be implemented in Task 9 */
-    (void)dev; (void)addr; (void)data; (void)length;
-    return DEV_ERR_NOT_SUPPORTED;
+    dev_err_t result;
+
+    DEV_CHECK_RET((dev != NULL),  DEV_ERR_NULL_PTR);
+    DEV_CHECK_RET((data != NULL), DEV_ERR_NULL_PTR);
+
+    /* For 8/16-bit memory address sizes, use mem_read */
+    if ((dev->mem_addr_size == DEV_EEP_MEM_ADDR_SIZE_8BIT) ||
+        (dev->mem_addr_size == DEV_EEP_MEM_ADDR_SIZE_16BIT))
+    {
+        dev_i2c_mem_addr_size_t i2c_addr_size;
+
+        i2c_addr_size = (dev->mem_addr_size == DEV_EEP_MEM_ADDR_SIZE_8BIT)
+                        ? DEV_I2C_MEM_ADDR_SIZE_8BIT
+                        : DEV_I2C_MEM_ADDR_SIZE_16BIT;
+
+        result = dev_i2c_mem_read(dev->i2c_bus,
+                                  dev->i2c_addr,
+                                  (uint16_t)addr,
+                                  i2c_addr_size,
+                                  data,
+                                  (uint16_t)length,
+                                  DEV_EEP_CFG_ACK_POLL_TIMEOUT_MS);
+    }
+    else
+    {
+        /* 24-bit or 32-bit: construct address bytes manually */
+        uint8_t addr_bytes[4U];
+        uint8_t addr_len;
+
+        if (dev->mem_addr_size == DEV_EEP_MEM_ADDR_SIZE_24BIT)
+        {
+            addr_bytes[0U] = (uint8_t)((addr >> 16U) & 0xFFU);
+            addr_bytes[1U] = (uint8_t)((addr >> 8U)  & 0xFFU);
+            addr_bytes[2U] = (uint8_t)(addr & 0xFFU);
+            addr_len = 3U;
+        }
+        else /* DEV_EEP_MEM_ADDR_SIZE_32BIT */
+        {
+            addr_bytes[0U] = (uint8_t)((addr >> 24U) & 0xFFU);
+            addr_bytes[1U] = (uint8_t)((addr >> 16U) & 0xFFU);
+            addr_bytes[2U] = (uint8_t)((addr >> 8U)  & 0xFFU);
+            addr_bytes[3U] = (uint8_t)(addr & 0xFFU);
+            addr_len = 4U;
+        }
+
+        /* write address, then read data */
+        result = dev_i2c_write_read(dev->i2c_bus,
+                                    dev->i2c_addr,
+                                    addr_bytes, addr_len,
+                                    data, (uint16_t)length,
+                                    DEV_EEP_CFG_ACK_POLL_TIMEOUT_MS);
+    }
+
+    return result;
 }
 
 static dev_err_t dev_eep_i2c_write_page(const dev_eep_device_t *dev,
@@ -243,16 +294,98 @@ static dev_err_t dev_eep_i2c_write_page(const dev_eep_device_t *dev,
                                         const uint8_t *data,
                                         dev_eep_size_t length)
 {
-    /* Will be implemented in Task 9 */
-    (void)dev; (void)addr; (void)data; (void)length;
-    return DEV_ERR_NOT_SUPPORTED;
+    dev_err_t result;
+
+    DEV_CHECK_RET((dev != NULL),  DEV_ERR_NULL_PTR);
+    DEV_CHECK_RET((data != NULL), DEV_ERR_NULL_PTR);
+    DEV_CHECK_RET((length <= dev->page_size), DEV_ERR_OUT_OF_RANGE);
+
+    /* For 8/16-bit memory address sizes, use mem_write */
+    if ((dev->mem_addr_size == DEV_EEP_MEM_ADDR_SIZE_8BIT) ||
+        (dev->mem_addr_size == DEV_EEP_MEM_ADDR_SIZE_16BIT))
+    {
+        dev_i2c_mem_addr_size_t i2c_addr_size;
+
+        i2c_addr_size = (dev->mem_addr_size == DEV_EEP_MEM_ADDR_SIZE_8BIT)
+                        ? DEV_I2C_MEM_ADDR_SIZE_8BIT
+                        : DEV_I2C_MEM_ADDR_SIZE_16BIT;
+
+        result = dev_i2c_mem_write(dev->i2c_bus,
+                                   dev->i2c_addr,
+                                   (uint16_t)addr,
+                                   i2c_addr_size,
+                                   data,
+                                   (uint16_t)length,
+                                   DEV_EEP_CFG_ACK_POLL_TIMEOUT_MS);
+    }
+    else
+    {
+        /* 24-bit or 32-bit: buffer address + data into single write */
+        uint8_t buf[128U]; /* max page size + 4 bytes address */
+        uint8_t addr_len;
+
+        if (dev->mem_addr_size == DEV_EEP_MEM_ADDR_SIZE_24BIT)
+        {
+            buf[0U] = (uint8_t)((addr >> 16U) & 0xFFU);
+            buf[1U] = (uint8_t)((addr >> 8U)  & 0xFFU);
+            buf[2U] = (uint8_t)(addr & 0xFFU);
+            addr_len = 3U;
+        }
+        else /* DEV_EEP_MEM_ADDR_SIZE_32BIT */
+        {
+            buf[0U] = (uint8_t)((addr >> 24U) & 0xFFU);
+            buf[1U] = (uint8_t)((addr >> 16U) & 0xFFU);
+            buf[2U] = (uint8_t)((addr >> 8U)  & 0xFFU);
+            buf[3U] = (uint8_t)(addr & 0xFFU);
+            addr_len = 4U;
+        }
+
+        (void)memcpy(&buf[addr_len], data, (size_t)length);
+
+        result = dev_i2c_write(dev->i2c_bus,
+                               dev->i2c_addr,
+                               buf,
+                               (uint16_t)(addr_len + length),
+                               DEV_EEP_CFG_ACK_POLL_TIMEOUT_MS);
+    }
+
+    return result;
 }
 
 static dev_err_t dev_eep_wait_write_cycle(const dev_eep_device_t *dev)
 {
-    /* Will be implemented in Task 9 */
-    (void)dev;
-    return DEV_ERR_NOT_SUPPORTED;
+    DEV_CHECK_RET((dev != NULL), DEV_ERR_NULL_PTR);
+
+#if (DEV_EEP_CFG_ACK_POLLING_ENABLED == DEV_ON)
+    {
+        uint32_t elapsed_ms = 0U;
+        dev_err_t probe_result;
+
+        while (elapsed_ms < DEV_EEP_CFG_ACK_POLL_TIMEOUT_MS)
+        {
+            probe_result = dev_i2c_probe(dev->i2c_bus,
+                                         dev->i2c_addr,
+                                         (dev_i2c_timeout_t)1U);
+            if (probe_result == DEV_OK)
+            {
+                /* Device ACKed — write cycle complete */
+                return DEV_OK;
+            }
+
+            /* Small delay between probes */
+            dev_delay_ms(1U);
+            elapsed_ms++;
+        }
+
+        return DEV_ERR_TIMEOUT;
+    }
+#else
+    {
+        /* Fallback: use write cycle time delay */
+        dev_delay_ms(dev->write_cycle_time_ms);
+        return DEV_OK;
+    }
+#endif
 }
 
 static dev_err_t dev_eep_update_crc(const dev_eep_device_t *dev)
