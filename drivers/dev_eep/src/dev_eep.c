@@ -450,3 +450,185 @@ static void dev_eep_load_defaults(const dev_eep_device_t *dev)
         }
     }
 }
+
+/* ── Lifecycle ── */
+
+dev_err_t dev_eep_init(void)
+{
+    dev_err_t result;
+    uint8_t i;
+
+    if (s_initialized)
+    {
+        return DEV_ERR_ALREADY_INITIALIZED;
+    }
+
+    /* Validate device configuration */
+    for (i = 0U; i < DEV_EEP_CFG_MAX_DEVICES; i++)
+    {
+        const dev_eep_device_t *dev = &s_devices[i];
+
+        if (dev->mirror == NULL)
+        {
+            return DEV_ERR_CONFIG;
+        }
+        if (dev->mirror_size != dev->total_size)
+        {
+            return DEV_ERR_CONFIG;
+        }
+        if (dev->page_size == 0U)
+        {
+            return DEV_ERR_CONFIG;
+        }
+        if (dev->dirty_map == NULL)
+        {
+            return DEV_ERR_CONFIG;
+        }
+    }
+
+    /* Validate layout (field overlap, bounds) */
+    result = dev_eep_validate_layout();
+    if (result != DEV_OK)
+    {
+        return result;
+    }
+
+    /* Clear dirty maps and mirrors */
+    for (i = 0U; i < DEV_EEP_CFG_MAX_DEVICES; i++)
+    {
+        const dev_eep_device_t *dev = &s_devices[i];
+        (void)memset(dev->mirror, 0, (size_t)dev->mirror_size);
+        (void)memset(dev->dirty_map, 0, (size_t)dev->dirty_map_size);
+    }
+
+    /* Read all EEPROM data into RAM mirror */
+#if (DEV_EEP_CFG_AUTO_READ_ALL_ON_INIT == DEV_ON)
+    {
+        for (i = 0U; i < DEV_EEP_CFG_MAX_DEVICES; i++)
+        {
+            result = dev_eep_read_all(s_devices[i].eep_id);
+            if (result != DEV_OK)
+            {
+                return result;
+            }
+        }
+    }
+#endif
+
+    /* Validate CRC / magic / version, load defaults if needed */
+#if (DEV_EEP_CFG_CRC_ENABLED == DEV_ON)
+    {
+        for (i = 0U; i < DEV_EEP_CFG_MAX_DEVICES; i++)
+        {
+            const dev_eep_device_t *dev = &s_devices[i];
+            uint32_t mirror_magic;
+
+            /* Check magic first */
+            (void)memcpy(&mirror_magic,
+                         &dev->mirror[DEV_EEP_LAYOUT_MAGIC_OFFSET],
+                         DEV_EEP_LAYOUT_MAGIC_SIZE);
+
+            if (mirror_magic != DEV_EEP_MAGIC_VALUE)
+            {
+#if (DEV_EEP_CFG_LOAD_DEFAULTS_ON_INVALID_CRC == DEV_ON)
+                dev_eep_load_defaults(dev);
+                continue;
+#else
+                return DEV_ERR_CRC;
+#endif
+            }
+
+            /* Check CRC */
+            result = dev_eep_check_crc(dev);
+            if (result != DEV_OK)
+            {
+#if (DEV_EEP_CFG_LOAD_DEFAULTS_ON_INVALID_CRC == DEV_ON)
+                dev_eep_load_defaults(dev);
+                continue;
+#else
+                return DEV_ERR_CRC;
+#endif
+            }
+        }
+    }
+#endif
+
+    s_initialized = true;
+    return DEV_OK;
+}
+
+dev_err_t dev_eep_shutdown(void)
+{
+    uint8_t i;
+    dev_err_t result;
+    dev_err_t first_error = DEV_OK;
+
+    if (!s_initialized)
+    {
+        return DEV_ERR_NOT_INITIALIZED;
+    }
+
+#if (DEV_EEP_CFG_AUTO_FLUSH_ON_SHUTDOWN == DEV_ON)
+    {
+        for (i = 0U; i < DEV_EEP_CFG_MAX_DEVICES; i++)
+        {
+#if (DEV_EEP_CFG_CRC_ENABLED == DEV_ON)
+            /* Update CRC before flushing */
+            result = dev_eep_update_crc(&s_devices[i]);
+            if (result != DEV_OK)
+            {
+                if (first_error == DEV_OK)
+                {
+                    first_error = result;
+                }
+                continue;
+            }
+#endif
+            result = dev_eep_flush(s_devices[i].eep_id);
+            if (result != DEV_OK)
+            {
+                if (first_error == DEV_OK)
+                {
+                    first_error = result;
+                }
+                /* Don't clear initialized state on partial failure */
+                continue;
+            }
+        }
+
+        if (first_error != DEV_OK)
+        {
+            return first_error;
+        }
+    }
+#endif
+
+    s_initialized = false;
+    return DEV_OK;
+}
+
+dev_err_t dev_eep_deinit(void)
+{
+    uint8_t i;
+
+    if (!s_initialized)
+    {
+        return DEV_ERR_NOT_INITIALIZED;
+    }
+
+    /* Clear mirrors and dirty maps */
+    for (i = 0U; i < DEV_EEP_CFG_MAX_DEVICES; i++)
+    {
+        const dev_eep_device_t *dev = &s_devices[i];
+        (void)memset(dev->mirror, 0, (size_t)dev->mirror_size);
+        (void)memset(dev->dirty_map, 0, (size_t)dev->dirty_map_size);
+    }
+
+    s_initialized = false;
+    return DEV_OK;
+}
+
+bool dev_eep_is_initialized(void)
+{
+    return s_initialized;
+}
