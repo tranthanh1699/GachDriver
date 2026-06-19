@@ -27,6 +27,7 @@ Application → dev_* public API → common implementation → port interface �
 | `dev_shell` | UART command shell | [docs/dev_shell/README.md](docs/dev_shell/README.md) |
 | `dev_log` | UART logging with colored macros | [docs/dev_log/README.md](docs/dev_log/README.md) |
 | `dev_adc` | ADC wrapper (logical channel, raw/mV, average) | [docs/dev_adc/README.md](docs/dev_adc/README.md) |
+| `dev_eep` | I2C EEPROM service with RAM mirror and dirty tracking | [docs/dev_eep/README.md](docs/dev_eep/README.md) |
 
 ## Quick Start
 
@@ -68,6 +69,7 @@ drivers/
   dev_crc/        CRC computation
   dev_list/       Linked list container
   dev_ringbuf/    SPSC byte ring buffer
+  dev_eep/        I2C EEPROM service
 tests/
   dev_gpio/       34 host tests
   dev_i2c/        24 host tests
@@ -79,6 +81,7 @@ docs/
   dev_i2c/        Library reference + porting guide
   dev_crc/        Library reference
   dev_list/       Library reference
+  dev_eep/        Library reference
 ```
 
 ## Porting
