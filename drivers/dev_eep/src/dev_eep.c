@@ -340,6 +340,12 @@ static dev_err_t dev_eep_i2c_write_page(const dev_eep_device_t *dev,
             addr_len = 4U;
         }
 
+        /* Ensure address + data fits in the stack buffer */
+        if ((size_t)((size_t)addr_len + (size_t)length) > sizeof(buf))
+        {
+            return DEV_ERR_OUT_OF_RANGE;
+        }
+
         (void)memcpy(&buf[addr_len], data, (size_t)length);
 
         result = dev_i2c_write(dev->i2c_bus,
