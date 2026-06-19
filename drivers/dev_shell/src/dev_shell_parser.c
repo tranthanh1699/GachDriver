@@ -18,7 +18,7 @@ dev_err_t dev_shell_parse_line(char *line, char *argv[], uint8_t max_args, uint8
         if (*line == '\0') break;
         if (count >= max_args) return DEV_ERR_OVERFLOW;
 
-#if (DEV_SHELL_CFG_QUOTE_PARSE_ENABLED == 1U)
+#if (DEV_SHELL_CFG_QUOTE_PARSE_ENABLED == DEV_ON)
         if (*line == '"') {
             line++;                         /* skip opening quote */
             argv[count++] = line;            /* arg starts after quote */

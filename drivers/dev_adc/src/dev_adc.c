@@ -42,7 +42,7 @@ dev_err_t dev_adc_read_raw(dev_adc_channel_t ch, dev_adc_raw_t *raw)
     return map_err(dev_adc_port_read_raw(ch, raw));
 }
 
-#if (DEV_ADC_CFG_MV_CONVERSION_ENABLED == 1U)
+#if (DEV_ADC_CFG_MV_CONVERSION_ENABLED == DEV_ON)
 
 dev_err_t dev_adc_read_mv(dev_adc_channel_t ch, dev_adc_mv_t *mv)
 {
@@ -79,7 +79,7 @@ dev_err_t dev_adc_raw_to_mv(dev_adc_channel_t ch, dev_adc_raw_t raw, dev_adc_mv_
 
 #endif
 
-#if (DEV_ADC_CFG_AVERAGE_ENABLED == 1U)
+#if (DEV_ADC_CFG_AVERAGE_ENABLED == DEV_ON)
 
 dev_err_t dev_adc_read_average_raw(dev_adc_channel_t ch,
                                    const dev_adc_average_config_t *cfg,

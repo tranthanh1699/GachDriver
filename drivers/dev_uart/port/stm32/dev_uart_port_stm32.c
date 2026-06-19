@@ -71,7 +71,7 @@ dev_err_t dev_uart_port_init(void)
             if (dev_ringbuf_init(&s_rx_rings[i], u->rx_buffer, u->rx_buffer_size) != DEV_OK) {
                 return DEV_ERR_CONFIG;
             }
-#if (DEV_UART_CFG_RX_BUFFER_ENABLED == 1U)
+#if (DEV_UART_CFG_RX_BUFFER_ENABLED == DEV_ON)
             if (HAL_UART_Receive_IT(u->handle, &s_rx_byte[i], DEV_UART_STM32_RX_TEMP_BYTE_COUNT) == HAL_OK) {
                 s_rx_running[i] = true;
             }

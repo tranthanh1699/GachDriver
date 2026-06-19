@@ -19,7 +19,7 @@ typedef struct {
 
 static dev_shell_state_t g_state;
 
-#if (DEV_SHELL_CFG_RUNTIME_COMMAND_ENABLED == 1U)
+#if (DEV_SHELL_CFG_RUNTIME_COMMAND_ENABLED == DEV_ON)
 static dev_shell_cmd_t s_runtime_commands[DEV_SHELL_CFG_MAX_RUNTIME_COMMANDS];
 static uint16_t        s_runtime_command_count;
 #endif
@@ -56,11 +56,11 @@ dev_err_t dev_shell_init(dev_uart_id_t uart_id)
 
     g_state.initialized = true;
 
-#if (DEV_SHELL_CFG_RUNTIME_COMMAND_ENABLED == 1U)
+#if (DEV_SHELL_CFG_RUNTIME_COMMAND_ENABLED == DEV_ON)
     s_runtime_command_count = 0U;
 #endif
 
-#if (DEV_SHELL_CFG_PROMPT_ENABLED == 1U)
+#if (DEV_SHELL_CFG_PROMPT_ENABLED == DEV_ON)
     (void)dev_shell_print_prompt();
 #endif
     return DEV_OK;
@@ -108,7 +108,7 @@ dev_err_t dev_shell_write_line(const char *text)
 {
     dev_err_t e = dev_shell_write(text);
     if (e != DEV_OK) return e;
-#if (DEV_SHELL_CFG_CRLF_ENABLED == 1U)
+#if (DEV_SHELL_CFG_CRLF_ENABLED == DEV_ON)
     return dev_shell_write("\r\n");
 #else
     return dev_shell_write("\n");
@@ -137,7 +137,7 @@ dev_err_t dev_shell_find_command(const char *name, const dev_shell_cmd_t **comma
     }
 
     /* Search runtime table second */
-#if (DEV_SHELL_CFG_RUNTIME_COMMAND_ENABLED == 1U)
+#if (DEV_SHELL_CFG_RUNTIME_COMMAND_ENABLED == DEV_ON)
     for (uint16_t i = 0U; i < s_runtime_command_count; i++) {
         if (strcmp(s_runtime_commands[i].name, name) == 0) {
             *command = &s_runtime_commands[i];
@@ -151,7 +151,7 @@ dev_err_t dev_shell_find_command(const char *name, const dev_shell_cmd_t **comma
 
 /* ── Runtime command registration ── */
 
-#if (DEV_SHELL_CFG_RUNTIME_COMMAND_ENABLED == 1U)
+#if (DEV_SHELL_CFG_RUNTIME_COMMAND_ENABLED == DEV_ON)
 
 static bool dev_shell_is_valid_cmd_name(const char *name)
 {
@@ -234,7 +234,7 @@ uint16_t dev_shell_get_runtime_command_count(void) { return s_runtime_command_co
 const dev_shell_cmd_t *dev_shell_private_get_runtime_cmd(uint16_t index)
     { return (index < s_runtime_command_count) ? &s_runtime_commands[index] : NULL; }
 
-#else /* RUNTIME_COMMAND_ENABLED == 0U */
+#else /* RUNTIME_COMMAND_ENABLED == DEV_OFF */
 
 dev_err_t dev_shell_register_command(const dev_shell_cmd_t *cmd)
     { DEV_UNUSED(cmd); return DEV_ERR_NOT_SUPPORTED; }
@@ -296,7 +296,7 @@ dev_err_t dev_shell_handle(void)
         g_state.last_was_cr = (byte == CR);
 
         if (byte == CR || byte == LF) {
-#if (DEV_SHELL_CFG_CRLF_ENABLED == 1U)
+#if (DEV_SHELL_CFG_CRLF_ENABLED == DEV_ON)
             (void)dev_shell_write("\r\n");
 #else
             (void)dev_shell_write("\n");
@@ -307,17 +307,17 @@ dev_err_t dev_shell_handle(void)
                 g_state.line_len = 0U;
                 if (e != DEV_OK) return e;
             }
-#if (DEV_SHELL_CFG_PROMPT_ENABLED == 1U)
+#if (DEV_SHELL_CFG_PROMPT_ENABLED == DEV_ON)
             (void)dev_shell_print_prompt();
 #endif
             continue;
         }
 
         if (byte == BS || byte == DEL) {
-#if (DEV_SHELL_CFG_BACKSPACE_ENABLED == 1U)
+#if (DEV_SHELL_CFG_BACKSPACE_ENABLED == DEV_ON)
             if (g_state.line_len > 0U) {
                 g_state.line_len--;
-#if (DEV_SHELL_CFG_ECHO_ENABLED == 1U)
+#if (DEV_SHELL_CFG_ECHO_ENABLED == DEV_ON)
                 (void)dev_shell_write("\b \b");
 #endif
             }
@@ -336,7 +336,7 @@ dev_err_t dev_shell_handle(void)
         }
 
         g_state.line[g_state.line_len++] = (char)byte;
-#if (DEV_SHELL_CFG_ECHO_ENABLED == 1U)
+#if (DEV_SHELL_CFG_ECHO_ENABLED == DEV_ON)
         (void)dev_shell_write_data(&byte, 1U);
 #endif
     }

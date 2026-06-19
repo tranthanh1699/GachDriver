@@ -104,7 +104,7 @@ dev_err_t dev_gpio_low(dev_gpio_pin_t pin)  { return dev_gpio_write(pin, DEV_GPI
 
 /* ── Interrupts ── */
 
-#if (DEV_GPIO_CFG_INTERRUPT_ENABLED == 1U)
+#if (DEV_GPIO_CFG_INTERRUPT_ENABLED == DEV_ON)
 
 dev_err_t dev_gpio_interrupt(dev_gpio_pin_t pin, dev_gpio_intr_t intr,
                              dev_gpio_callback_t cb, void *arg)

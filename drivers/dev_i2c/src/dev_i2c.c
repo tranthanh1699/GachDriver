@@ -100,7 +100,7 @@ dev_err_t dev_i2c_write_read(dev_i2c_bus_t bus, dev_i2c_addr_t addr,
 
 /* ── Memory access ── */
 
-#if (DEV_I2C_CFG_MEM_ACCESS_ENABLED == 1U)
+#if (DEV_I2C_CFG_MEM_ACCESS_ENABLED == DEV_ON)
 
 dev_err_t dev_i2c_mem_write(dev_i2c_bus_t bus, dev_i2c_addr_t addr,
                             uint16_t mem_addr, dev_i2c_mem_addr_size_t mem_addr_size,
@@ -162,7 +162,7 @@ dev_err_t dev_i2c_probe(dev_i2c_bus_t bus, dev_i2c_addr_t addr, dev_i2c_timeout_
     return map_err(dev_i2c_port_probe(bus, addr, timeout_ms));
 }
 
-#if (DEV_I2C_CFG_BUS_RECOVERY_ENABLED == 1U)
+#if (DEV_I2C_CFG_BUS_RECOVERY_ENABLED == DEV_ON)
 
 dev_err_t dev_i2c_recover_bus(dev_i2c_bus_t bus)
 {

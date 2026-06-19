@@ -31,7 +31,7 @@ dev_err_t dev_shell_cmd_help(uint8_t argc, char *argv[])
     }
 
     /* Runtime commands */
-#if (DEV_SHELL_CFG_RUNTIME_COMMAND_ENABLED == 1U)
+#if (DEV_SHELL_CFG_RUNTIME_COMMAND_ENABLED == DEV_ON)
     {
         uint16_t rt = dev_shell_get_runtime_command_count();
         dev_shell_write_line("");
@@ -60,7 +60,7 @@ dev_err_t dev_shell_cmd_explain(uint8_t argc, char *argv[])
     dev_shell_write_line("Type 'help <command>' to show command usage.");
     dev_shell_write_line("Commands are separated by spaces.");
     dev_shell_write_line("Arguments can be string, int, uint, hex, or bool.");
-#if (DEV_SHELL_CFG_RUNTIME_COMMAND_ENABLED == 1U)
+#if (DEV_SHELL_CFG_RUNTIME_COMMAND_ENABLED == DEV_ON)
     dev_shell_write_line("Commands can be registered at runtime.");
     dev_shell_write_line("Runtime capacity is controlled by DEV_SHELL_CFG_MAX_RUNTIME_COMMANDS.");
 #endif
