@@ -25,8 +25,6 @@ extern "C" {
  *   2. Ensure hi2cX handles are declared extern in your project
  */
 
-#define DEV_I2C_STM32_CUBE_MANAGED_HW_INIT  (1U)
-
 #ifdef HAL_I2C_MODULE_ENABLED
 #include "stm32h7xx_hal.h"
 
