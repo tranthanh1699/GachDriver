@@ -24,7 +24,7 @@ static const svc_eep_device_t s_devices[SVC_EEP_CFG_MAX_DEVICES] =
         ((dev_i2c_addr_t)0x50U),
         SVC_EEP_MAIN_TOTAL_SIZE,
         SVC_EEP_MAIN_PAGE_SIZE,
-        SVC_EEP_MEM_ADDR_SIZE_16BIT,
+        SVC_EEP_MEM_ADDR_SIZE_8BIT,
         SVC_EEP_CFG_DEFAULT_WRITE_CYCLE_TIME_MS,
         s_eep_main_mirror,
         SVC_EEP_MAIN_TOTAL_SIZE,

@@ -7,7 +7,6 @@ extern "C" {
 
 #include "dev_i2c_types.h"
 
-#define DEV_I2C_CFG_MAX_BUSES              (2U)
 #define DEV_I2C_CFG_RUNTIME_CHECK_ENABLED  DEV_ON
 #define DEV_I2C_CFG_10BIT_ADDR_ENABLED     DEV_OFF
 #define DEV_I2C_CFG_MEM_ACCESS_ENABLED     DEV_ON
@@ -16,9 +15,10 @@ extern "C" {
 #define DEV_I2C_TIMEOUT_DEFAULT_MS         (100U)
 #define DEV_I2C_ADDR_7BIT_MAX              (0x7FU)
 
-/* Logical I2C bus IDs */
-#define DEV_I2C_BUS_SENSOR                 ((dev_i2c_bus_t)0U)
-#define DEV_I2C_BUS_EEPROM                 ((dev_i2c_bus_t)1U)
+enum {
+    DEV_I2C_BUS_EEPROM = 0U,
+    DEV_I2C_CFG_MAX_BUSES
+};
 
 #ifdef __cplusplus
 }

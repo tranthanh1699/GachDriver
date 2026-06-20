@@ -31,8 +31,8 @@ extern "C" {
 #define SVC_EEP_MAIN                               ((svc_eep_id_t)0U)
 
 /* ── EEPROM dimensions ── */
-#define SVC_EEP_MAIN_TOTAL_SIZE                    (1024U)
-#define SVC_EEP_MAIN_PAGE_SIZE                     (16U)
+#define SVC_EEP_MAIN_TOTAL_SIZE                    (256u)
+#define SVC_EEP_MAIN_PAGE_SIZE                     (8U)   /* AT24C02: 8-byte page write buffer */
 #define SVC_EEP_MAIN_PAGE_COUNT                    (SVC_EEP_MAIN_TOTAL_SIZE / SVC_EEP_MAIN_PAGE_SIZE)
 #define SVC_EEP_MAIN_DIRTY_MAP_SIZE                ((SVC_EEP_MAIN_PAGE_COUNT + 7U) / 8U)
 

@@ -6,7 +6,7 @@ extern "C" {
 #endif
 
 #include "dev_i2c_port.h"
-
+#include "stm32h7xx_hal_conf.h"
 /*
  * STM32 Cube-managed I2C port.
  *

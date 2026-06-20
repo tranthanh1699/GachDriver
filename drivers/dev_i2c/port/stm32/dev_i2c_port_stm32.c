@@ -7,11 +7,9 @@
  * Cube-generated HAL handles — declare as extern.
  * If your handles are named differently, update the map below.
  */
-extern I2C_HandleTypeDef hi2c1;
 extern I2C_HandleTypeDef hi2c2;
 
 static const dev_i2c_hw_bus_t s_i2c_map[DEV_I2C_CFG_MAX_BUSES] = {
-    [DEV_I2C_BUS_SENSOR] = { DEV_I2C_BUS_SENSOR, &hi2c1, DEV_I2C_SPEED_FAST },
     [DEV_I2C_BUS_EEPROM] = { DEV_I2C_BUS_EEPROM, &hi2c2, DEV_I2C_SPEED_STANDARD },
 };
 
