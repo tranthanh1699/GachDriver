@@ -2,6 +2,7 @@
 
 #include "svc_eep.h"
 #include "svc_shell.h"
+#include "app_lifecycle.h"
 #include "dev_uart_cfg.h"
 
 /* ── Wrappers for APIs that require arguments ── */
@@ -23,7 +24,19 @@ const svc_sm_module_t g_svc_sm_modules[] =
         NULL,
         NULL,
         svc_shell_deinit,
+        NULL,
         false  /* non-critical */
+    },
+    {
+        "app",
+        app_init,        /* init     — POST_INIT: modules are up */
+        app_start,       /* start    — POST_INIT: after app_init */
+        app_run,         /* handle   — RUN: every superloop iteration */
+        app_stop,        /* stop     — reserved */
+        app_shutdown,    /* shutdown — save state before modules stop */
+        NULL,            /* deinit   — not needed */
+        app_error,       /* error_handler — called once in ERROR state */
+        true             /* critical — app failure is fatal */
     },
 };
 

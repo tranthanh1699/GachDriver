@@ -64,6 +64,7 @@ typedef struct
     svc_sm_module_fn_t  stop;
     svc_sm_module_fn_t  shutdown;
     svc_sm_module_fn_t  deinit;
+    svc_sm_module_fn_t  error_handler;
     bool                critical;
 } svc_sm_module_t;
 

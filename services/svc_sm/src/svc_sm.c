@@ -1,12 +1,5 @@
 #include "svc_sm.h"
 #include "svc_sm_modules.h"
-/* ── Application lifecycle callbacks (defined in app/src/app_lifecycle.c) ── */
-extern dev_err_t app_init(void);
-extern dev_err_t app_start(void);
-extern dev_err_t app_run(void);
-extern dev_err_t app_stop(void);
-extern dev_err_t app_shutdown(void);
-extern dev_err_t app_error(void);
 #include "dev_assert.h"
 
 /* ── Private state ── */
@@ -17,7 +10,7 @@ static svc_sm_state_t  g_svc_sm_prev_state   = SVC_SM_STATE_UNINIT;
 static svc_sm_request_t g_svc_sm_pending_request = SVC_SM_REQUEST_NONE;
 static svc_sm_error_info_t g_svc_sm_last_error;
 static bool            g_svc_sm_error_stored  = false;
-static bool            g_svc_sm_app_error_called = false;
+static bool            g_svc_sm_error_callbacks_called = false;
 
 /* ── Forward declarations ── */
 
@@ -29,6 +22,7 @@ static dev_err_t svc_sm_run_modules_handle(void);
 static dev_err_t svc_sm_run_modules_stop(void);
 static dev_err_t svc_sm_run_modules_shutdown(void);
 static dev_err_t svc_sm_run_modules_deinit(void);
+static dev_err_t svc_sm_run_modules_error(void);
 static void svc_sm_store_error(dev_err_t error, const char *module_name);
 static dev_err_t svc_sm_execute_shutdown(void);
 
@@ -290,6 +284,30 @@ static dev_err_t svc_sm_run_modules_deinit(void)
     return ret;
 }
 
+static dev_err_t svc_sm_run_modules_error(void)
+{
+    uint16_t i;
+    dev_err_t ret = DEV_OK;
+
+    for (i = 0U; i < g_svc_sm_module_count; i++)
+    {
+        const svc_sm_module_t *mod = &g_svc_sm_modules[i];
+
+        if (mod->error_handler == NULL)
+        {
+            continue;
+        }
+
+        ret = mod->error_handler();
+        if (ret != DEV_OK)
+        {
+            svc_sm_store_error(ret, mod->name);
+        }
+    }
+
+    return ret;
+}
+
 /* ── Error storage ── */
 
 static void svc_sm_store_error(dev_err_t error, const char *module_name)
@@ -304,15 +322,7 @@ static void svc_sm_store_error(dev_err_t error, const char *module_name)
 
 static dev_err_t svc_sm_execute_shutdown(void)
 {
-    dev_err_t ret;
-
     (void)svc_sm_set_state(SVC_SM_STATE_PREPARE_SHUTDOWN);
-
-    ret = app_shutdown();
-    if (ret != DEV_OK)
-    {
-        svc_sm_store_error(ret, "app");
-    }
 
     (void)svc_sm_run_modules_stop();
     (void)svc_sm_run_modules_shutdown();
@@ -334,7 +344,7 @@ dev_err_t svc_sm_init(void)
     g_svc_sm_prev_state        = SVC_SM_STATE_UNINIT;
     g_svc_sm_pending_request   = SVC_SM_REQUEST_NONE;
     g_svc_sm_error_stored      = false;
-    g_svc_sm_app_error_called  = false;
+    g_svc_sm_error_callbacks_called = false;
     g_svc_sm_initialized       = true;
 
     return DEV_OK;
@@ -379,22 +389,6 @@ dev_err_t svc_sm_startup(void)
     ret = svc_sm_set_state(SVC_SM_STATE_POST_INIT);
     if (ret != DEV_OK)
     {
-        return ret;
-    }
-
-    ret = app_init();
-    if (ret != DEV_OK)
-    {
-        svc_sm_store_error(ret, "app");
-        (void)svc_sm_set_state(SVC_SM_STATE_ERROR);
-        return ret;
-    }
-
-    ret = app_start();
-    if (ret != DEV_OK)
-    {
-        svc_sm_store_error(ret, "app");
-        (void)svc_sm_set_state(SVC_SM_STATE_ERROR);
         return ret;
     }
 
@@ -456,25 +450,15 @@ dev_err_t svc_sm_handle(void)
         }
 #endif
 
-#if (SVC_SM_CFG_CALL_APP_RUN_IN_HANDLE == 1U)
-        ret = app_run();
-        if (ret != DEV_OK)
-        {
-            svc_sm_store_error(ret, "app");
-            (void)svc_sm_set_state(SVC_SM_STATE_ERROR);
-            return ret;
-        }
-#endif
-
         break;
 
     case SVC_SM_STATE_ERROR:
 
-        /* Call app_error() once per error entry */
-        if (!g_svc_sm_app_error_called)
+        /* Call module error handlers once per error entry */
+        if (!g_svc_sm_error_callbacks_called)
         {
-            g_svc_sm_app_error_called = true;
-            ret = app_error();
+            g_svc_sm_error_callbacks_called = true;
+            ret = svc_sm_run_modules_error();
             if (ret != DEV_OK)
             {
                 return ret;
@@ -583,7 +567,7 @@ dev_err_t svc_sm_request_error(dev_err_t reason)
 #if (SVC_SM_CFG_ERROR_STATE_ENABLED == 1U)
     svc_sm_store_error(reason, NULL);
     g_svc_sm_pending_request  = SVC_SM_REQUEST_ERROR;
-    g_svc_sm_app_error_called = false;
+    g_svc_sm_error_callbacks_called = false;
     return DEV_OK;
 #else
     (void)reason;

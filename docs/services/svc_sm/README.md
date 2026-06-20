@@ -30,8 +30,7 @@ services/svc_sm/
     svc_sm_modules.h      ← Module table declaration (g_svc_sm_modules[])
   src/
     svc_sm.c              ← State machine core — all logic lives here
-    svc_sm_modules.c      ← Module table definition — list your services here
-    svc_sm_app.c          ← Weak default app lifecycle (all return DEV_OK)
+    svc_sm_modules.c      ← Module table definition — list your services + app here
 ```
 
 Companion files in `app/`:
@@ -39,9 +38,9 @@ Companion files in `app/`:
 ```
 app/
   include/
-    app_lifecycle.h       ← Your app's lifecycle declarations
+    app_lifecycle.h       ← App lifecycle declarations (authoritative)
   src/
-    app_lifecycle.c       ← Your app's lifecycle implementations (overrides weak defaults)
+    app_lifecycle.c       ← App lifecycle implementations
 ```
 
 ---
@@ -70,12 +69,12 @@ app/
 |-------|-----------|---------|
 | `UNINIT` | `SVC_SM_STATE_UNINIT` | System not yet initialized. State after `svc_sm_init()`. |
 | `STARTUP` | `SVC_SM_STATE_STARTUP` | Startup sequence has begun. Brief transitional state. |
-| `INIT` | `SVC_SM_STATE_INIT` | Module `init()` and `start()` callbacks are called here. |
-| `POST_INIT` | `SVC_SM_STATE_POST_INIT` | Modules are up. `app_init()` and `app_start()` run here. |
-| `RUN` | `SVC_SM_STATE_RUN` | **Normal operation.** `svc_sm_handle()` calls module handles + `app_run()`. |
-| `PREPARE_SHUTDOWN` | `SVC_SM_STATE_PREPARE_SHUTDOWN` | Shutdown started. `app_shutdown()` called. |
+| `INIT` | `SVC_SM_STATE_INIT` | Module `init()` and `start()` callbacks in forward order. App runs last as a module entry. |
+| `POST_INIT` | `SVC_SM_STATE_POST_INIT` | Transitional — all modules (including app) are initialized. |
+| `RUN` | `SVC_SM_STATE_RUN` | **Normal operation.** `svc_sm_handle()` calls module handles in forward order (app runs last). |
+| `PREPARE_SHUTDOWN` | `SVC_SM_STATE_PREPARE_SHUTDOWN` | Shutdown started. Module stop/shutdown/deinit in reverse order (app runs first). |
 | `SHUTDOWN` | `SVC_SM_STATE_SHUTDOWN` | System halted. All modules deinitialized. Terminal. |
-| `ERROR` | `SVC_SM_STATE_ERROR` | A fault occurred. `app_error()` is called once. |
+| `ERROR` | `SVC_SM_STATE_ERROR` | A fault occurred. Module `error_handler()` callbacks are called once (forward order). |
 
 Optional sleep states (enabled via `SVC_SM_CFG_SLEEP_ENABLED = 1U`):
 
@@ -140,12 +139,10 @@ Runs the full startup sequence. **Must be called exactly once** after `svc_sm_in
 ```
 Step 1  ──► SVC_SM_STATE_STARTUP
 Step 2  ──► SVC_SM_STATE_INIT
-Step 3  ──► Module init()    [index 0 → N-1]    ← forward order
-Step 4  ──► Module start()   [index 0 → N-1]    ← forward order
+Step 3  ──► Module init()    [index 0 → N-1]    ← forward order (app last)
+Step 4  ──► Module start()   [index 0 → N-1]    ← forward order (app last)
 Step 5  ──► SVC_SM_STATE_POST_INIT
-Step 6  ──► app_init()
-Step 7  ──► app_start()
-Step 8  ──► SVC_SM_STATE_RUN
+Step 6  ──► SVC_SM_STATE_RUN
 ```
 
 **Error handling during startup:**
@@ -154,8 +151,9 @@ Step 8  ──► SVC_SM_STATE_RUN
   returns the error code. Startup is aborted.
 - **Non-critical module failure**: error is stored (accessible via
   `svc_sm_get_last_error()`), startup continues.
-- **App lifecycle failure** (`app_init()` or `app_start()` returns error): system
-  enters `ERROR`, startup is aborted.
+- **App module failure**: the app is registered as a critical module — if
+  `app_init()` or `app_start()` returns an error, the system enters `ERROR`
+  and startup is aborted.
 
 **Returns:**
 | Return | Meaning |
@@ -179,14 +177,13 @@ Must return quickly — no infinite loops or long blocking delays inside.
 ```
 1. Check for pending ERROR request → transition to ERROR if present
 2. Check for pending SHUTDOWN request → execute shutdown if present
-3. Call module handle()  [index 0 → N-1]   ← if SVC_SM_CFG_CALL_MODULE_HANDLE_IN_RUN = 1U
-4. Call app_run()                            ← if SVC_SM_CFG_CALL_APP_RUN_IN_HANDLE = 1U
+3. Call module handle()  [index 0 → N-1]   ← forward order (app last)
 ```
 
 **What happens on each call (ERROR state):**
 
 ```
-1. Call app_error() — once per error entry
+1. Call module error_handler() — once per error entry (forward order)
 2. Check for pending SHUTDOWN request → execute shutdown if present
 ```
 
@@ -209,11 +206,10 @@ pending shutdown request is processed by `svc_sm_handle()`.
 
 ```
 Step 1  ──► SVC_SM_STATE_PREPARE_SHUTDOWN
-Step 2  ──► app_shutdown()
-Step 3  ──► Module stop()      [index N-1 → 0]   ← reverse order
-Step 4  ──► Module shutdown()  [index N-1 → 0]   ← reverse order
-Step 5  ──► Module deinit()    [index N-1 → 0]   ← reverse order
-Step 6  ──► SVC_SM_STATE_SHUTDOWN
+Step 2  ──► Module stop()      [index N-1 → 0]   ← reverse order (app first)
+Step 3  ──► Module shutdown()  [index N-1 → 0]   ← reverse order (app first)
+Step 4  ──► Module deinit()    [index N-1 → 0]   ← reverse order (app first)
+Step 5  ──► SVC_SM_STATE_SHUTDOWN
 ```
 
 The reverse order ensures that higher-level services shut down before the lower-level
@@ -405,66 +401,74 @@ That's it. No dynamic registration. The table is `const`.
 
 ## 6. Application Lifecycle
 
-### 6.1 Callback Reference
+### 6.1 How It Works
 
-Declared in `app/include/app_lifecycle.h` (authoritative), with weak defaults in `services/svc_sm/src/svc_sm_app.c`:
+The application is registered as a **module entry** in the module table
+(`svc_sm_modules.c`), using the same `svc_sm_module_t` descriptor as every
+other service. It is placed **last** in the table so that it initializes
+after all drivers and services, and shuts down before them (reverse order).
+
+The app entry maps lifecycle functions to module callbacks:
+
+| App Function | Module Callback | When Called |
+|-------------|----------------|-------------|
+| `app_init()` | `init` | During INIT (forward, after all services) |
+| `app_start()` | `start` | During INIT (forward, after all services) |
+| `app_run()` | `handle` | During RUN (forward, after all services) |
+| `app_stop()` | `stop` | During shutdown (reverse, before all services) |
+| `app_shutdown()` | `shutdown` | During shutdown (reverse, before all services) |
+| `app_error()` | `error_handler` | Once per ERROR entry (forward) |
+
+`s` is marked **critical** — if any app callback fails, the system
+enters `ERROR`.
+
+### 6.2 Callback Reference
+
+Declared in `app/include/app_lifecycle.h`, defined in `app/src/app_lifecycle.c`:
 
 ```c
-dev_err_t app_init(void);       /* POST_INIT — modules are up, restore state here */
-dev_err_t app_start(void);      /* POST_INIT — after app_init(), before RUN */
+dev_err_t app_init(void);       /* INIT — modules are up, restore state here */
+dev_err_t app_start(void);      /* INIT — after app_init(), before RUN */
 dev_err_t app_run(void);        /* RUN — every superloop iteration */
 dev_err_t app_stop(void);       /* Shutdown — before modules stop (reserved) */
-dev_err_t app_shutdown(void);   /* Shutdown — first step, save state here */
+dev_err_t app_shutdown(void);   /* Shutdown — save state before modules stop */
 dev_err_t app_error(void);      /* ERROR — called once when error occurs */
 ```
 
-### 6.2 Callback Timing Diagram
+### 6.3 Callback Timing Diagram
 
 ```
 svc_sm_startup()
   │
   ├─ SVC_SM_STATE_INIT
-  │    ├─ module[0].init()
-  │    ├─ module[1].init()
+  │    ├─ module[0].init()      (svc_shell)
+  │    ├─ module[1].init()      (app)        ← app_init()
   │    ├─ module[0].start()
-  │    ├─ module[1].start()
+  │    ├─ module[1].start()     (app)        ← app_start()
   │
   ├─ SVC_SM_STATE_POST_INIT
-  │    ├─ app_init()          ← ① your init code here
-  │    └─ app_start()         ← ② your start code here
   │
   └─ SVC_SM_STATE_RUN
        └─ svc_sm_handle() called repeatedly ───┐
             ├─ module[0].handle()              │
-            ├─ module[1].handle()              │
-            └─ app_run()          ← ③ called every iteration
+            └─ module[1].handle() (app)        ← app_run()
                                                │
   ┌────────────────────────────────────────────┘
   │
   ├─ Shutdown requested
   │    ├─ SVC_SM_STATE_PREPARE_SHUTDOWN
-  │    │    └─ app_shutdown()   ← ④ save state, notify
-  │    ├─ module[1].stop()      (reverse)
+  │    ├─ module[1].stop()       (app, reverse first)
   │    ├─ module[0].stop()
-  │    ├─ module[1].shutdown()
+  │    ├─ module[1].shutdown()   (app)        ← app_shutdown()
   │    ├─ module[0].shutdown()
   │    ├─ module[1].deinit()
   │    ├─ module[0].deinit()
   │    └─ SVC_SM_STATE_SHUTDOWN
 
   ── ERROR (from any state) ──
-       └─ app_error()           ← ⑤ safe state, log, notify
+       ├─ module[0].error_handler()
+       └─ module[1].error_handler() (app)     ← app_error()
 ```
-
-### 6.3 Default Implementation (Weak)
-
-The file `services/svc_sm/src/svc_sm_app.c` provides **weak defaults** for all six
-callbacks — each simply returns `DEV_OK`. This means:
-
-- If you **don't** create `app/src/app_lifecycle.c`, the system still compiles
-  and runs. All callbacks are no-ops.
-- If you **do** create `app/src/app_lifecycle.c` (strong symbols), the linker
-  prefers your implementation over the weak defaults.
 
 ### 6.4 Example Application Lifecycle
 
@@ -595,12 +599,9 @@ Edit this single file to tune the state machine.
 
 /* ── Runtime behavior ── */
 
-/* When 1U: app_run() is called from svc_sm_handle() during RUN state.
- * When 0U: app_run() is never called. Useful if app logic runs elsewhere. */
-#define SVC_SM_CFG_CALL_APP_RUN_IN_HANDLE       (1U)
-
 /* When 1U: module handle() callbacks are called from svc_sm_handle() during RUN.
- * When 0U: module handles are never called. Useful for pure event-driven designs. */
+ * When 0U: module handles are never called. Useful for pure event-driven designs.
+ * Note: app_run() is part of the module handle() iteration (app is a module). */
 #define SVC_SM_CFG_CALL_MODULE_HANDLE_IN_RUN    (1U)
 
 
@@ -621,7 +622,6 @@ Edit this single file to tune the state machine.
 #define SVC_SM_CFG_SLEEP_ENABLED                (0U)   /* no sleep states */
 #define SVC_SM_CFG_SHUTDOWN_ENABLED             (0U)   /* no graceful shutdown */
 #define SVC_SM_CFG_SAFE_SHUTDOWN_ENABLED        (0U)
-#define SVC_SM_CFG_CALL_APP_RUN_IN_HANDLE       (0U)   /* app_run() not called */
 #define SVC_SM_CFG_CALL_MODULE_HANDLE_IN_RUN    (0U)   /* module handles not called */
 #define SVC_SM_CFG_USE_DEV_LOG                  (0U)
 ```
@@ -634,7 +634,6 @@ Edit this single file to tune the state machine.
 #define SVC_SM_CFG_SLEEP_ENABLED                (0U)   /* not yet implemented */
 #define SVC_SM_CFG_SHUTDOWN_ENABLED             (1U)
 #define SVC_SM_CFG_SAFE_SHUTDOWN_ENABLED        (1U)
-#define SVC_SM_CFG_CALL_APP_RUN_IN_HANDLE       (1U)
 #define SVC_SM_CFG_CALL_MODULE_HANDLE_IN_RUN    (1U)
 #define SVC_SM_CFG_USE_DEV_LOG                  (1U)
 ```
@@ -832,10 +831,10 @@ target_link_libraries(${PROJECT_NAME}
 add_library(svc_sm STATIC
     src/svc_sm.c
     src/svc_sm_modules.c
-    src/svc_sm_app.c
 )
 
 target_include_directories(svc_sm PUBLIC include)
+target_include_directories(svc_sm PRIVATE ${CMAKE_SOURCE_DIR}/app/include)
 target_link_libraries(svc_sm PUBLIC dev_common svc_eep svc_shell dev_uart)
 ```
 
@@ -851,9 +850,9 @@ in its include path and can use `#include "svc_sm.h"`.
 ```
 svc_sm  ──►  dev_common       (types, errors, assert macros)
 svc_sm  ──►  osal              (time/delay — if needed in the future)
-svc_sm  ──►  app_lifecycle     (application callbacks)
 svc_sm  ──►  svc_eep           (through module table)
 svc_sm  ──►  svc_shell         (through module table)
+svc_sm  ──►  app_lifecycle     (through module table — app is a module)
 ```
 
 ### Forbidden
@@ -885,12 +884,15 @@ If `svc_sm` needs time or delay, it uses `osal_get_tick_ms()` / `osal_delay_ms()
 - **Predictable**: state changes happen at known points — inside `svc_sm_handle()`.
 - **Testable**: the request + process split makes it easy to unit-test each side.
 
-### Why weak app lifecycle defaults?
+### Why is the app a module entry?
 
-- **Compiles without app code**: clean build when iterating on services.
-- **No linker errors**: app is optional until you need it.
-- **Override only what you need**: define `app_run()` and leave the rest as weak
-  `DEV_OK` stubs.
+- **Uniformity**: the state machine has one mechanism — the module table.
+  No special-case `app_*()` calls hardcoded in `svc_sm.c`.
+- **Ordering**: app is placed last in the table. Forward init/start/handle means
+  app runs after all services. Reverse stop/shutdown means app runs before all
+  services. This is exactly the desired lifecycle ordering.
+- **Testability**: the app can be replaced with a mock module entry for host
+  testing without modifying `svc_sm.c`.
 
 ---
 
@@ -914,27 +916,27 @@ a Linux host by:
 - Normal startup reaches RUN
 - Module init called in forward order
 - Module start called in forward order
-- `app_init()` / `app_start()` called
+- App module `init` / `start` called last in forward order
 - Critical module failure enters ERROR and aborts
 - Non-critical module failure stores error and continues
-- App lifecycle failure enters ERROR
+- App module failure (critical) enters ERROR
 
 **Runtime tests:**
 - Module handle called in RUN
-- `app_run()` called in RUN
+- Module `handle()` called in RUN (app last)
 - Handle without init returns `DEV_ERR_NOT_INITIALIZED`
 
 **Shutdown tests:**
 - `svc_sm_request_shutdown()` from RUN returns `DEV_OK`
 - Shutdown reaches `SHUTDOWN` state
 - Module stop/shutdown/deinit called in reverse order
-- `app_shutdown()` called before modules
+- Module `shutdown()` called in reverse order (app first)
 - Shutdown from invalid state returns `DEV_ERR_INVALID_STATE`
 
 **Error tests:**
 - `svc_sm_request_error()` stores error info
 - Error info is retrievable via `svc_sm_get_last_error()`
-- `app_error()` called once per error entry
+- Module `error_handler()` called once per error entry
 - Shutdown can be requested from ERROR
 - Invalid transition rejected
 
@@ -973,8 +975,8 @@ a Linux host by:
 │ modules[]    │ STATIC const table in svc_sm_modules.c.             │
 │              │ Order matters: forward for init, reverse for stop.  │
 ├──────────────┼─────────────────────────────────────────────────────┤
-│ app_*()      │ 6 weak callbacks. Override in app_lifecycle.c.      │
-│              │ All return DEV_OK by default.                       │
+│ app_*()      │ App is a critical module entry in the module table.│
+│              │ Defined in app/src/app_lifecycle.c.                  │
 ├──────────────┼─────────────────────────────────────────────────────┤
 │ config       │ svc_sm_cfg.h — toggle features, max modules,        │
 │              │ runtime checks, logging.                            │

@@ -22,7 +22,6 @@ extern "C" {
 
 /* ── Runtime behavior ── */
 
-#define SVC_SM_CFG_CALL_APP_RUN_IN_HANDLE       (1U)
 #define SVC_SM_CFG_CALL_MODULE_HANDLE_IN_RUN    (1U)
 
 /* ── Logging ── */
