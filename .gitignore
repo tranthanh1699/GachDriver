@@ -36,6 +36,7 @@ Image/
 
 # Local agent/tool metadata
 .codex
+.agents
 .gitnexus/
 .claude/
 codex_bootloader_skills/
@@ -47,3 +48,5 @@ Cert/
 Session.md
 new_bootloader.h
 Application_Old
+skills-lock.json
+
