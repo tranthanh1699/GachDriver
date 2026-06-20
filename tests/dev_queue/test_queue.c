@@ -76,7 +76,8 @@ TEST(5_init_zero_capacity)
 
 TEST(6_double_init)
 {
-    dev_queue_init(&g_q, g_storage, sizeof(uint32_t), Q_CAP);
+    dev_queue_deinit(&g_q);
+    CHECK_ERR(dev_queue_init(&g_q, g_storage, sizeof(uint32_t), Q_CAP), DEV_OK, "first init");
     CHECK_ERR(dev_queue_init(&g_q, g_storage, sizeof(uint32_t), Q_CAP), DEV_ERR_ALREADY_INITIALIZED, "double init");
     printf("    PASS\n"); g_passes++;
 }
@@ -85,7 +86,8 @@ TEST(6_double_init)
 
 TEST(7_deinit)
 {
-    dev_queue_init(&g_q, g_storage, sizeof(uint32_t), Q_CAP);
+    dev_queue_deinit(&g_q);
+    CHECK_ERR(dev_queue_init(&g_q, g_storage, sizeof(uint32_t), Q_CAP), DEV_OK, "init");
     CHECK_ERR(dev_queue_deinit(&g_q), DEV_OK, "deinit");
     CHECK(!g_q.initialized, "!initialized after deinit");
     printf("    PASS\n"); g_passes++;
@@ -118,7 +120,8 @@ TEST(10_pop_before_init)
 
 TEST(11_null_item_push)
 {
-    dev_queue_init(&g_q, g_storage, sizeof(uint32_t), Q_CAP);
+    dev_queue_deinit(&g_q);
+    CHECK_ERR(dev_queue_init(&g_q, g_storage, sizeof(uint32_t), Q_CAP), DEV_OK, "init");
     CHECK_ERR(dev_queue_push(&g_q, NULL), DEV_ERR_NULL_PTR, "null item push");
     printf("    PASS\n"); g_passes++;
 }
