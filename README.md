@@ -8,6 +8,7 @@ Hardware-independent driver layer for STM32, ESP32, nRF52, and future MCUs.
 Application → svc_* services → dev_* drivers → port interface → vendor HAL
 ```
 
+- **Platform** (`platform/`) — OS/platform abstraction (OSAL)
 - **Drivers** (`drivers/`) — low-level hardware wrappers with `dev_` prefix
 - **Services** (`services/`) — reusable modules built on top of drivers with `svc_` prefix
 - **Application** (`app/`) — product/application logic
@@ -32,12 +33,19 @@ Application → svc_* services → dev_* drivers → port interface → vendor H
 | `dev_ringbuf` | SPSC byte ring buffer | [docs/dev_ringbuf/README.md](docs/dev_ringbuf/README.md) |
 | `dev_log` | UART logging with colored macros | [docs/dev_log/README.md](docs/dev_log/README.md) |
 
+### Platform
+
+| Component | Description | Documentation |
+|-----------|-------------|---------------|
+| `osal` | OS abstraction layer (bare-metal, future RTOS) | [docs/platform/osal/README.md](docs/platform/osal/README.md) |
+
 ### Services (`svc_` prefix)
 
 | Component | Description | Documentation |
 |-----------|-------------|---------------|
 | `svc_shell` | UART command shell | [docs/services/svc_shell/README.md](docs/services/svc_shell/README.md) |
 | `svc_eep` | I2C EEPROM service with RAM mirror and dirty tracking | [docs/services/svc_eep/README.md](docs/services/svc_eep/README.md) |
+| `svc_sm` | Service state manager (superloop, lifecycle, shutdown) | [docs/services/svc_sm/README.md](docs/services/svc_sm/README.md) |
 
 ## Quick Start
 
@@ -62,18 +70,23 @@ int main(void) {
 ```cmake
 set(DEV_GPIO_PORT "stm32"  CACHE STRING "GPIO port: mock, stm32")
 set(DEV_I2C_PORT  "stm32"  CACHE STRING "I2C port: mock, stm32, esp32")
+add_subdirectory(platform/osal)
 add_subdirectory(drivers/dev_common)
 add_subdirectory(drivers/dev_gpio)
 add_subdirectory(drivers/dev_i2c)
 add_subdirectory(services/svc_shell)
 add_subdirectory(services/svc_eep)
+add_subdirectory(services/svc_sm)
 # ... etc
-target_link_libraries(${PROJECT_NAME} dev_common dev_gpio dev_i2c svc_shell svc_eep ...)
+target_link_libraries(${PROJECT_NAME} osal dev_common dev_gpio dev_i2c svc_shell svc_eep svc_sm ...)
 ```
 
 ## Folder Structure
 
 ```
+platform/        OS/platform abstraction
+  osal/          OS abstraction layer (bare-metal, future RTOS)
+
 drivers/         Low-level hardware wrappers (dev_*)
   dev_common/    Foundation (types, errors, assert)
   dev_gpio/      GPIO driver
@@ -88,6 +101,7 @@ drivers/         Low-level hardware wrappers (dev_*)
 services/        Reusable services built on drivers (svc_*)
   svc_shell/     UART command shell
   svc_eep/       I2C EEPROM service
+  svc_sm/        Service state manager
 
 app/             Product/application logic
 
@@ -102,12 +116,15 @@ tests/
 docs/
   drivers/       Driver layer overview
   services/      Service layer overview
+  platform/      Platform layer overview
+    osal/        OSAL reference
   dev_common/    Library reference
   dev_gpio/      Library reference + porting guide
   dev_i2c/       Library reference + porting guide
   services/
     svc_shell/   Service reference
     svc_eep/     Service reference
+    svc_sm/      Service state manager reference
 ```
 
 ## Porting

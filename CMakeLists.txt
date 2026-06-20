@@ -46,6 +46,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 set(DEV_GPIO_PORT "stm32" CACHE STRING "GPIO port: mock, stm32")
 set(DEV_I2C_PORT  "stm32" CACHE STRING "I2C port: mock, stm32, esp32")
 set(DEV_UART_PORT "stm32" CACHE STRING "UART port: mock, stm32, esp32, nrf52")
+# Add driver modules
 add_subdirectory(drivers/dev_common)
 add_subdirectory(drivers/dev_gpio)
 add_subdirectory(drivers/dev_i2c)
@@ -54,11 +55,19 @@ add_subdirectory(drivers/dev_crc)
 add_subdirectory(drivers/dev_ringbuf)
 add_subdirectory(drivers/dev_uart)
 add_subdirectory(drivers/dev_log)
-add_subdirectory(services/svc_shell)
-add_subdirectory(services/svc_eep)
 add_subdirectory(drivers/dev_adc)
 
+# Add platform modules
+add_subdirectory(platform/osal)
+
+# Add service modules
+add_subdirectory(services/svc_shell)
+add_subdirectory(services/svc_eep)
+add_subdirectory(services/svc_sm)
+
+
 target_link_libraries(${CMAKE_PROJECT_NAME}
+    # Add user defined libraries
     dev_common
     dev_gpio
     dev_i2c
@@ -67,9 +76,24 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     dev_ringbuf
     dev_uart
     dev_log
+    dev_adc
+
+    # Add platform modules
+    osal
+
+    # Add service modules
     svc_shell
     svc_eep
-    dev_adc
+    svc_sm
+)
+
+# Add application sources
+target_sources(${CMAKE_PROJECT_NAME} PRIVATE
+    app/src/app_lifecycle.c
+)
+
+target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
+    app/include
 )
 
 # Add project symbols (macros)
