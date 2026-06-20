@@ -28,7 +28,7 @@ This protects EEPROM lifetime — each byte in an EEPROM has a finite number of 
 
 ```
                   ┌─────────────┐
-                  │  Application │
+                  │  Application│
                   └──────┬──────┘
                          │ dev_eep_read / dev_eep_write (to/from RAM only!)
                   ┌──────▼──────┐
