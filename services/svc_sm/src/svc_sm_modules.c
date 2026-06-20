@@ -16,16 +16,6 @@ static dev_err_t svc_sm_shell_init_wrapper(void)
 const svc_sm_module_t g_svc_sm_modules[] =
 {
     {
-        "svc_eep",
-        svc_eep_init,
-        NULL,
-        NULL,
-        NULL,
-        svc_eep_shutdown,
-        svc_eep_deinit,
-        true   /* critical */
-    },
-    {
         "svc_shell",
         svc_sm_shell_init_wrapper,
         NULL,
