@@ -6,7 +6,7 @@ extern "C" {
 #endif
 
 #include "dev_i2c_port.h"
-#include "stm32h7xx_hal_conf.h"
+#include "stm32h7xx_hal.h"   /* must come first — includes stm32h7xx_hal_conf.h internally */
 /*
  * STM32 Cube-managed I2C port.
  *
@@ -26,7 +26,6 @@ extern "C" {
  */
 
 #ifdef HAL_I2C_MODULE_ENABLED
-#include "stm32h7xx_hal.h"
 
 typedef struct {
     dev_i2c_bus_t   bus_id;
