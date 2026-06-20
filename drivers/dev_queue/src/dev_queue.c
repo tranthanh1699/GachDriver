@@ -30,7 +30,7 @@ static void dev_queue_item_ptr(const dev_queue_t *queue,
                                dev_queue_size_t idx,
                                uint8_t **out_ptr)
 {
-    *out_ptr = &queue->buffer[(dev_queue_size_t)(idx * queue->item_size)];
+    *out_ptr = &queue->buffer[idx * queue->item_size];
 }
 
 /* ── Lifecycle ── */
@@ -84,12 +84,16 @@ dev_err_t dev_queue_reset(dev_queue_t *queue)
 
 #if (DEV_QUEUE_CFG_CLEAR_ON_RESET_ENABLED == 1U)
     {
-        dev_queue_size_t total_bytes;
-        dev_queue_size_t i;
-        total_bytes = (dev_queue_size_t)(queue->capacity * queue->item_size);
-        for (i = 0U; i < total_bytes; i++)
+        dev_queue_size_t item_idx;
+        dev_queue_size_t byte_idx;
+        for (item_idx = 0U; item_idx < queue->capacity; item_idx++)
         {
-            queue->buffer[i] = 0U;
+            uint8_t *slot;
+            dev_queue_item_ptr(queue, item_idx, &slot);
+            for (byte_idx = 0U; byte_idx < queue->item_size; byte_idx++)
+            {
+                slot[byte_idx] = 0U;
+            }
         }
     }
 #endif
@@ -287,7 +291,7 @@ dev_err_t dev_queue_push_many(dev_queue_t *queue,
     DEV_CHECK_PTR_RET(items);
     DEV_CHECK_RET((item_count > 0U), DEV_ERR_INVALID_ARG);
 
-    if ((dev_queue_size_t)(queue->count + item_count) > queue->capacity)
+    if ((dev_queue_size_t)(queue->capacity - queue->count) < item_count)
     {
         return DEV_ERR_OVERFLOW;
     }
