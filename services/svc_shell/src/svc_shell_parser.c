@@ -1,11 +1,11 @@
-#include "dev_shell_parser.h"
+#include "svc_shell_parser.h"
 #include "dev_common.h"
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
 #include <limits.h>
 
-dev_err_t dev_shell_parse_line(char *line, char *argv[], uint8_t max_args, uint8_t *argc)
+dev_err_t svc_shell_parse_line(char *line, char *argv[], uint8_t max_args, uint8_t *argc)
 {
     uint8_t count = 0U;
 
@@ -18,7 +18,7 @@ dev_err_t dev_shell_parse_line(char *line, char *argv[], uint8_t max_args, uint8
         if (*line == '\0') break;
         if (count >= max_args) return DEV_ERR_OVERFLOW;
 
-#if (DEV_SHELL_CFG_QUOTE_PARSE_ENABLED == DEV_ON)
+#if (SVC_SHELL_CFG_QUOTE_PARSE_ENABLED == DEV_ON)
         if (*line == '"') {
             line++;                         /* skip opening quote */
             argv[count++] = line;            /* arg starts after quote */
@@ -38,10 +38,10 @@ dev_err_t dev_shell_parse_line(char *line, char *argv[], uint8_t max_args, uint8
     return DEV_OK;
 }
 
-bool dev_shell_arg_is_equal(const char *arg, const char *expected)
+bool svc_shell_arg_is_equal(const char *arg, const char *expected)
     { return (arg && expected) ? (strcmp(arg, expected) == 0) : false; }
 
-dev_err_t dev_shell_arg_to_i32(const char *arg, int32_t *value)
+dev_err_t svc_shell_arg_to_i32(const char *arg, int32_t *value)
 {
     char *end;
     if (!arg || !value) return DEV_ERR_NULL_PTR;
@@ -54,7 +54,7 @@ dev_err_t dev_shell_arg_to_i32(const char *arg, int32_t *value)
     return DEV_OK;
 }
 
-dev_err_t dev_shell_arg_to_u32(const char *arg, uint32_t *value)
+dev_err_t svc_shell_arg_to_u32(const char *arg, uint32_t *value)
 {
     char *end;
     if (!arg || !value) return DEV_ERR_NULL_PTR;
@@ -69,35 +69,35 @@ dev_err_t dev_shell_arg_to_u32(const char *arg, uint32_t *value)
     return DEV_OK;
 }
 
-dev_err_t dev_shell_arg_to_u16(const char *arg, uint16_t *value)
+dev_err_t svc_shell_arg_to_u16(const char *arg, uint16_t *value)
 {
-    uint32_t v; dev_err_t e = dev_shell_arg_to_u32(arg, &v);
+    uint32_t v; dev_err_t e = svc_shell_arg_to_u32(arg, &v);
     if (e != DEV_OK) return e;
     if (v > 0xFFFFU) return DEV_ERR_OUT_OF_RANGE;
     *value = (uint16_t)v; return DEV_OK;
 }
 
-dev_err_t dev_shell_arg_to_u8(const char *arg, uint8_t *value)
+dev_err_t svc_shell_arg_to_u8(const char *arg, uint8_t *value)
 {
-    uint32_t v; dev_err_t e = dev_shell_arg_to_u32(arg, &v);
+    uint32_t v; dev_err_t e = svc_shell_arg_to_u32(arg, &v);
     if (e != DEV_OK) return e;
     if (v > 0xFFU) return DEV_ERR_OUT_OF_RANGE;
     *value = (uint8_t)v; return DEV_OK;
 }
 
-dev_err_t dev_shell_arg_to_bool(const char *arg, bool *value)
+dev_err_t svc_shell_arg_to_bool(const char *arg, bool *value)
 {
     if (!arg || !value) return DEV_ERR_NULL_PTR;
-    if (dev_shell_arg_is_equal(arg, "true") || dev_shell_arg_is_equal(arg, "1")
-     || dev_shell_arg_is_equal(arg, "on")  || dev_shell_arg_is_equal(arg, "yes"))
+    if (svc_shell_arg_is_equal(arg, "true") || svc_shell_arg_is_equal(arg, "1")
+     || svc_shell_arg_is_equal(arg, "on")  || svc_shell_arg_is_equal(arg, "yes"))
         { *value = true; return DEV_OK; }
-    if (dev_shell_arg_is_equal(arg, "false") || dev_shell_arg_is_equal(arg, "0")
-     || dev_shell_arg_is_equal(arg, "off")   || dev_shell_arg_is_equal(arg, "no"))
+    if (svc_shell_arg_is_equal(arg, "false") || svc_shell_arg_is_equal(arg, "0")
+     || svc_shell_arg_is_equal(arg, "off")   || svc_shell_arg_is_equal(arg, "no"))
         { *value = false; return DEV_OK; }
     return DEV_ERR_PARSE;
 }
 
-dev_err_t dev_shell_arg_to_hex_u32(const char *arg, uint32_t *value)
+dev_err_t svc_shell_arg_to_hex_u32(const char *arg, uint32_t *value)
 {
     char *end;
     if (!arg || !value) return DEV_ERR_NULL_PTR;

@@ -1,5 +1,5 @@
-#ifndef DEV_SHELL_TYPES_H
-#define DEV_SHELL_TYPES_H
+#ifndef SVC_SHELL_TYPES_H
+#define SVC_SHELL_TYPES_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -8,17 +8,17 @@ extern "C" {
 #include "dev_types.h"
 #include "dev_error.h"
 
-typedef dev_err_t (*dev_shell_cmd_fn_t)(uint8_t argc, char *argv[]);
+typedef dev_err_t (*svc_shell_cmd_fn_t)(uint8_t argc, char *argv[]);
 
 typedef struct {
     const char        *name;
     const char        *help;
     const char        *usage;
-    dev_shell_cmd_fn_t function;
-} dev_shell_cmd_t;
+    svc_shell_cmd_fn_t function;
+} svc_shell_cmd_t;
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* DEV_SHELL_TYPES_H */
+#endif /* SVC_SHELL_TYPES_H */

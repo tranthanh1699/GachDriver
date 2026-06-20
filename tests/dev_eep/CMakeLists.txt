@@ -13,15 +13,15 @@ add_subdirectory(${PROJECT_ROOT}/drivers/dev_common ${CMAKE_BINARY_DIR}/dev_comm
 add_subdirectory(${PROJECT_ROOT}/drivers/dev_crc ${CMAKE_BINARY_DIR}/dev_crc)
 add_subdirectory(${PROJECT_ROOT}/drivers/dev_i2c ${CMAKE_BINARY_DIR}/dev_i2c)
 
-# Compile dev_eep as part of the test (no separate library yet)
+# Compile svc_eep as part of the test (no separate library yet)
 add_executable(eep_test_host
     test_eep.c
-    ${PROJECT_ROOT}/drivers/dev_eep/src/dev_eep.c
-    ${PROJECT_ROOT}/drivers/dev_eep/src/dev_eep_layout.c
+    ${PROJECT_ROOT}/services/svc_eep/src/svc_eep.c
+    ${PROJECT_ROOT}/services/svc_eep/src/svc_eep_layout.c
 )
 
 target_include_directories(eep_test_host PRIVATE
-    ${PROJECT_ROOT}/drivers/dev_eep/include
+    ${PROJECT_ROOT}/services/svc_eep/include
     ${PROJECT_ROOT}/drivers/dev_i2c/port/mock
 )
 

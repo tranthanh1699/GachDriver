@@ -25,7 +25,7 @@
 /* USER CODE BEGIN Includes */
 #include "dev_common.h"
 #include "dev_log.h"
-#include "dev_shell.h"
+#include "svc_shell.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -94,7 +94,7 @@ int main(void)
   MX_GPIO_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
-  dev_shell_init(DEV_UART_CONSOLE);
+  svc_shell_init(DEV_UART_CONSOLE);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -104,7 +104,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    dev_shell_handle();
+    svc_shell_handle();
   }
   /* USER CODE END 3 */
 }
