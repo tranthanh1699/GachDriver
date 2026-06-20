@@ -30,6 +30,7 @@ Application → svc_* services → dev_* drivers → port interface → vendor H
 | `dev_adc` | ADC wrapper (logical channel, raw/mV, average) | [docs/dev_adc/README.md](docs/dev_adc/README.md) |
 | `dev_crc` | CRC-8/16/32 computation | [docs/dev_crc/README.md](docs/dev_crc/README.md) |
 | `dev_list` | Fixed-capacity singly-linked list | [docs/dev_list/README.md](docs/dev_list/README.md) |
+| `dev_queue` | Generic static FIFO queue for fixed-size items | [docs/dev_queue/README.md](docs/dev_queue/README.md) |
 | `dev_ringbuf` | SPSC byte ring buffer | [docs/dev_ringbuf/README.md](docs/dev_ringbuf/README.md) |
 | `dev_log` | UART logging with colored macros | [docs/dev_log/README.md](docs/dev_log/README.md) |
 
