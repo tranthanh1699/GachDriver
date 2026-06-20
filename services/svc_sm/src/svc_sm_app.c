@@ -1,5 +1,8 @@
-#include "svc_sm_app.h"
+#include "dev_error.h"
 #include "dev_compiler.h"
+
+/* ── Application lifecycle callbacks ──
+ * Weak defaults that the application can override with strong symbols. */
 
 /**
  * @brief Weak default application lifecycle implementations.

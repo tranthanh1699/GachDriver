@@ -28,7 +28,6 @@ services/svc_sm/
     svc_sm_types.h        ← State enum, request enum, error info, module descriptor
     svc_sm_cfg.h          ← Compile-time configuration (feature toggles)
     svc_sm_modules.h      ← Module table declaration (g_svc_sm_modules[])
-    svc_sm_app.h          ← App lifecycle declaration (app_init, app_run, ...)
   src/
     svc_sm.c              ← State machine core — all logic lives here
     svc_sm_modules.c      ← Module table definition — list your services here
@@ -408,7 +407,7 @@ That's it. No dynamic registration. The table is `const`.
 
 ### 6.1 Callback Reference
 
-Declared in `app_lifecycle.h`, defined in `app/src/app_lifecycle.c`:
+Declared in `app/include/app_lifecycle.h` (authoritative), with weak defaults in `services/svc_sm/src/svc_sm_app.c`:
 
 ```c
 dev_err_t app_init(void);       /* POST_INIT — modules are up, restore state here */

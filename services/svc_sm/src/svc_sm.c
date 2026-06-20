@@ -1,6 +1,12 @@
 #include "svc_sm.h"
 #include "svc_sm_modules.h"
-#include "svc_sm_app.h"
+/* ── Application lifecycle callbacks (defined in app/src/app_lifecycle.c) ── */
+extern dev_err_t app_init(void);
+extern dev_err_t app_start(void);
+extern dev_err_t app_run(void);
+extern dev_err_t app_stop(void);
+extern dev_err_t app_shutdown(void);
+extern dev_err_t app_error(void);
 #include "dev_assert.h"
 
 /* ── Private state ── */
