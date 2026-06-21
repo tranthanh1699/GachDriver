@@ -1,43 +1,41 @@
 # svc_eep — EEPROM Service
 
-## 1. What Is It?
+## 1. What It Is
 
-`svc_eep` is a safe, wear-reducing service layer for external I2C EEPROM chips (24Cxx and similar). Instead of reading and writing the physical EEPROM on every access, it keeps a **RAM mirror** of the entire EEPROM content. Your application reads and writes the mirror; only when you explicitly flush (or shut down) are changed bytes written back to the physical chip.
+`svc_eep` is a safe, wear-reducing service layer for external I2C EEPROM chips. Instead of reading and writing the physical EEPROM on every access, it keeps a **RAM mirror** of the entire EEPROM content. Your application reads and writes the mirror; only when you explicitly flush (or shut down) are changed bytes written back to the physical chip.
 
-This protects EEPROM lifetime — each byte in an EEPROM has a finite number of write cycles (typically 100,000–1,000,000). Writing only changed pages, and only when you say so, dramatically reduces wear.
+This protects EEPROM lifetime — each byte is rated for ~1,000,000 write cycles. Writing only changed pages, and only when you say so, dramatically reduces wear.
 
-`svc_eep` delegates all I2C communication to `dev_eep` (the EEPROM device driver), which in turn uses `dev_i2c`. `svc_eep` never calls I2C APIs directly.
+`svc_eep` delegates all I2C communication to `dev_eep` (the EEPROM device driver), which in turn uses `dev_i2c`. **`svc_eep` never calls I2C APIs directly and never includes vendor headers.**
 
-### Key features
+### Key Features
 
 | Feature | What it does |
 |---------|-------------|
-| RAM mirror | All reads come from RAM; no I2C traffic after init |
+| RAM mirror | All reads come from RAM; zero I2C traffic during normal operation |
 | Dirty-page tracking | Only pages with changed data are written to EEPROM |
 | Compare-before-write | Identical data is silently skipped — zero wear |
-| CRC-16 integrity | Optional CRC check on init to detect corruption |
-| Magic + version | Detects blank or corrupted EEPROM at boot |
-| Field-based access | Read/write by logical name, not raw offset |
-| Page-safe writes | Never writes across an EEPROM page boundary |
-| ACK polling | Waits for EEPROM write cycle to complete before next write |
-| Multi-size addressing | Supports 8-bit, 16-bit, 24-bit, and 32-bit EEPROM address widths |
+| CRC-16 integrity | Detects corruption at boot |
+| Magic + version | Detects blank or corrupted EEPROM on first boot |
+| Field-based access | Read/write by logical name (`SVC_EEP_FIELD_BOOT_COUNT`), not raw offset |
+| Typed helpers | `svc_eep_read_u32()`, `svc_eep_write_u8()`, etc. — no manual `sizeof` |
 
 ---
 
-## 2. How It Works
-
-### 2.1 The Mirror Model
+## 2. Architecture — How the Layers Fit
 
 ```
                   ┌─────────────┐
                   │  Application│
                   └──────┬──────┘
-                         │ svc_eep_read / svc_eep_write (to/from RAM only!)
+                         │ svc_eep_read_field / svc_eep_write_field
+                         │ (reads/writes RAM only — no I2C!)
                   ┌──────▼──────┐
-                  │  RAM mirror │  256 bytes (configurable)
+                  │  RAM mirror │  256 bytes (configurable per chip)
                   │  + dirty map│  4 bytes (1 bit per page)
                   └──────┬──────┘
                          │ svc_eep_flush / svc_eep_shutdown
+                         │ (calls dev_eep_write for each dirty page)
                   ┌──────▼──────┐
                   │   dev_eep   │  page splitting, ACK polling, address width
                   └──────┬──────┘
@@ -45,13 +43,17 @@ This protects EEPROM lifetime — each byte in an EEPROM has a finite number of 
                   ┌──────▼──────┐
                   │   dev_i2c   │  I2C bus abstraction
                   └──────┬──────┘
-                         │ I2C bus
+                         │ I2C bus (SDA + SCL)
                   ┌──────▼──────┐
                   │ EEPROM chip │  Physical AT24C02 / 24C08 / etc.
                   └─────────────┘
 ```
 
-### 2.2 Lifecycle
+**Key rule:** `svc_eep` → `dev_eep` → `dev_i2c` → port. Each layer only talks to the one below it.
+
+---
+
+## 3. Lifecycle
 
 ```
 POWER ON
@@ -60,75 +62,80 @@ POWER ON
 dev_i2c_init()          ← initialize the I2C bus (port layer)
    │
    ▼
-dev_eep_init()          ← probe EEPROM on I2C bus (called by svc_eep_init)
-   │
-   ▼
-svc_eep_init()          ← reads entire EEPROM → RAM mirror via dev_eep
+svc_eep_init()          ← internally calls dev_eep_init() to probe the chip
+   │                     ← reads entire EEPROM → RAM mirror via dev_eep_read()
    │                     ← validates magic, version, CRC
-   │                     ← loads defaults if EEPROM is blank/corrupt
+   │                     ← loads defaults if EEPROM is blank or corrupt
    │
    ▼
-┌──────────────────────────────────────────┐
-│  APPLICATION RUNS                        │
-│                                          │
-│  svc_eep_read_xxx()   ← reads from RAM   │
-│  svc_eep_write_xxx()  ← writes to RAM    │
-│                         marks pages dirty │
-│                                          │
-│  svc_eep_flush()      ← writes dirty     │
-│                         pages to EEPROM   │
-└──────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│  APPLICATION RUNS                                │
+│                                                  │
+│  svc_eep_read_field()   ← reads from RAM mirror  │
+│  svc_eep_write_field()  ← writes to RAM mirror   │
+│  svc_eep_read_u32()     ← typed convenience      │
+│  svc_eep_write_u32()    ← marks pages dirty       │
+│                                                  │
+│  svc_eep_flush()        ← writes dirty pages     │
+│                            to EEPROM via dev_eep  │
+└──────────────────────────────────────────────────┘
    │
    ▼
-svc_eep_shutdown()      ← updates CRC, flushes dirty pages, clears state
+svc_eep_shutdown()       ← updates CRC, flushes all dirty pages, deinits dev_eep
    │
    ▼
 POWER OFF
 ```
 
-### 2.3 Write Flow (Inside `svc_eep_write`)
+---
+
+## 4. Write Flow — What Happens on `svc_eep_write_field`
 
 ```
-Application calls svc_eep_write(field, data, len)
+Application calls svc_eep_write_field(BOOT_COUNT, &val, 4)
    │
    ▼
-Is driver initialized? ──NO──→ DEV_ERR_NOT_INITIALIZED
+Is service initialized? ──NO──→ DEV_ERR_NOT_INITIALIZED
    │YES
    ▼
-Is address valid? ──NO──→ DEV_ERR_OUT_OF_RANGE
+Is field_id valid? ──NO──→ DEV_ERR_INVALID_ARG
    │YES
    ▼
-Is new data == existing mirror data? ──YES──→ DEV_OK (no-op, no wear)
+Is length ≤ field.size? ──NO──→ DEV_ERR_INVALID_ARG
+   │YES
+   ▼
+Is new data == existing mirror data? ──YES──→ DEV_OK (no-op, zero wear!)
    │NO
    ▼
-memcpy(data → mirror)
+memcpy(data → mirror[field.offset])
    │
    ▼
 Mark affected pages dirty in dirty_map
    │
    ▼
-DEV_OK  (physical EEPROM NOT written yet)
+DEV_OK  (physical EEPROM NOT written yet!)
 ```
 
-### 2.4 Flush Flow (Inside `svc_eep_flush`)
+The data is now in RAM. It will be written to EEPROM only when you call `svc_eep_flush()` or `svc_eep_shutdown()`.
+
+---
+
+## 5. Flush Flow — What Happens on `svc_eep_flush`
 
 ```
 svc_eep_flush()
    │
    ▼
-For each page (0 .. page_count-1):
+For each page (0 .. DEV_EEP_MAIN_PAGE_COUNT - 1):
    │
    ▼
 Is page dirty? ──NO──→ skip to next page
    │YES
    ▼
-Write page to physical EEPROM via I2C
-   │
+dev_eep_write(page_addr, mirror[page_addr], page_size)
+   │  ↑ dev_eep handles page splitting and ACK polling internally
    ▼
-Wait for EEPROM write cycle (ACK polling or delay)
-   │
-   ▼
-Write succeeded? ──NO──→ return error (dirty bit stays set)
+Write succeeded? ──NO──→ return error (dirty bit STAYS SET — can retry)
    │YES
    ▼
 Clear dirty bit for this page
@@ -142,74 +149,137 @@ DEV_OK
 
 ---
 
-## 3. EEPROM Memory Layout
+## 6. Dirty Map — How Dirty Tracking Works
 
-### 3.1 Visual Map
+The dirty map is a bit-array. Each bit represents one EEPROM page. Bit = 1 means "this page has been modified in RAM but not yet written to EEPROM."
 
-The default layout uses the first 44 bytes of EEPROM for metadata; the remaining 980 bytes are available for your application fields.
+```
+EEPROM pages:    [0] [1] [2] [3] [4] [5] [6] [7] ... [31]
+                     ↓
+Dirty map bytes: byte[0] = 0b00101100
+                   bits:   7 6 5 4 3 2 1 0
+                           ↑       ↑ ↑
+                      page 5   page 3 page 2 are dirty
+```
+
+- The dirty map size is computed automatically: `(DEV_EEP_MAIN_PAGE_COUNT + 7) / 8` bytes.
+- For a 256-byte EEPROM with 8-byte pages: 32 pages → 4 bytes.
+- Dirty bits are set by `svc_eep_write()` / `svc_eep_write_field()`.
+- Dirty bits are cleared only after a successful `dev_eep_write()` in `svc_eep_flush()`.
+- If a flush fails mid-way, dirty bits for failed pages remain set — retrying the flush will re-write those pages.
+
+---
+
+## 7. EEPROM Memory Layout
+
+### 7.1 Visual Map
+
+The first 44 bytes are metadata. The remaining space is free for application fields.
 
 ```
 Offset  Size  Field              Description
 ──────  ────  ─────────────────  ───────────────────────────────────────
-0x0000   4    MAGIC              0x44564550 ("DEVP") — proves EEPROM is valid
+0x0000   4    MAGIC              0x44564550 ("DEVP") — proves valid data
 0x0004   2    VERSION            Layout version (currently 1)
 0x0006   2    CRC                CRC-16 over bytes 0x0000–0x0005
-0x0008   4    BOOT_COUNT         Incremented on each boot (your app manages this)
+0x0008   4    BOOT_COUNT         Incremented on each boot
 0x000C  32    DEVICE_NAME        Null-terminated device name string
 ──────  ────  ─────────────────  ───────────────────────────────────────
-0x002C 980    (free space)       Add your own fields here
+0x002C 212    (free space)       Add your own fields here
 ──────  ────  ─────────────────  ───────────────────────────────────────
+TOTAL 256                        0x0000 + 4 + 2 + 2 + 4 + 32 = 0x002C (44 bytes used)
 ```
 
-### 3.2 Built-in Fields
+### 7.2 Built-in Fields
 
-| Field ID macro | C type | Size | Purpose |
-|---------------|--------|------|---------|
-| `SVC_EEP_FIELD_MAGIC` | `uint32_t` | 4 | Magic number `0x44564550` — proves EEPROM was programmed by this firmware |
-| `SVC_EEP_FIELD_VERSION` | `uint16_t` | 2 | Layout version — change when you reorganize fields |
-| `SVC_EEP_FIELD_CRC` | `uint16_t` | 2 | CRC-16 over magic + version (excludes CRC field itself) |
-| `SVC_EEP_FIELD_BOOT_COUNT` | `uint32_t` | 4 | Boot counter — application increments on each power-on |
-| `SVC_EEP_FIELD_DEVICE_NAME` | `char[32]` | 32 | Human-readable name (e.g., "Controller-A") |
+| Field ID macro | C type | Size (bytes) | Purpose |
+|---------------|--------|-------------|---------|
+| `SVC_EEP_FIELD_MAGIC` | `uint32_t` | 4 | `0x44564550` — proves this EEPROM was programmed by our firmware |
+| `SVC_EEP_FIELD_VERSION` | `uint16_t` | 2 | Layout version — bump this when you reorganize fields |
+| `SVC_EEP_FIELD_CRC` | `uint16_t` | 2 | CRC-16 over magic + version |
+| `SVC_EEP_FIELD_BOOT_COUNT` | `uint32_t` | 4 | Boot counter — application increments each power-on |
+| `SVC_EEP_FIELD_DEVICE_NAME` | `char[32]` | 32 | Human-readable name ("Controller-A") |
 
-### 3.3 CRC Coverage
+### 7.3 CRC Coverage
 
 ```
-CRC covers:  bytes 0x0000 through 0x0005  (magic + version)
+CRC covers:  bytes 0x0000 through 0x0005  (magic + version = 6 bytes)
 CRC stored:  bytes 0x0006 through 0x0007  (excluded from calculation)
 ```
 
-The CRC is recalculated and written just before each flush/shutdown.
+The CRC is recalculated and written to EEPROM just before each flush/shutdown.
+
+### 7.4 Field Offset Chain
+
+Each field's offset = previous field's offset + previous field's size. This is a self-verifying chain — if you add a field with the wrong offset, `svc_eep_init()` detects the overlap and returns `DEV_ERR_CONFIG`.
+
+```c
+#define SVC_EEP_LAYOUT_MAGIC_OFFSET         (0x0000U)
+#define SVC_EEP_LAYOUT_MAGIC_SIZE           (4U)    // → ends at 0x0004
+
+#define SVC_EEP_LAYOUT_VERSION_OFFSET       (0x0004U)
+#define SVC_EEP_LAYOUT_VERSION_SIZE         (2U)    // → ends at 0x0006
+
+#define SVC_EEP_LAYOUT_CRC_OFFSET           (0x0006U)
+#define SVC_EEP_LAYOUT_CRC_SIZE             (2U)    // → ends at 0x0008
+
+#define SVC_EEP_LAYOUT_BOOT_COUNT_OFFSET    (0x0008U)
+#define SVC_EEP_LAYOUT_BOOT_COUNT_SIZE      (4U)    // → ends at 0x000C
+
+#define SVC_EEP_LAYOUT_DEVICE_NAME_OFFSET   (0x000CU)
+#define SVC_EEP_LAYOUT_DEVICE_NAME_SIZE     (32U)   // → ends at 0x002C
+```
 
 ---
 
-## 4. Configuration Guide
+## 8. Configuration Guide
 
-Service-level configuration is in `services/svc_eep/include/svc_eep_cfg.h`. EEPROM device-level configuration (dimensions, I2C address, page size) is in `drivers/dev_eep/include/dev_eep_cfg.h`.
+Configuration is split across two files:
 
-### 4.1 EEPROM Dimensions (in `dev_eep_cfg.h`)
+| File | What it controls |
+|------|-----------------|
+| `drivers/dev_eep/include/dev_eep_cfg.h` | EEPROM dimensions, I2C address, page size, ACK polling timing |
+| `services/svc_eep/include/svc_eep_cfg.h` | Service-level toggles (mirror, CRC, auto-flush, etc.) |
 
-Set the EEPROM chip dimensions in `drivers/dev_eep/include/dev_eep_cfg.h`:
+### 8.1 EEPROM Dimensions — in `dev_eep_cfg.h`
+
+These MUST match your physical chip. Get them wrong and writes will silently corrupt data.
 
 ```c
-// Total EEPROM size in bytes. Check your chip: 24C01=128, 24C02=256,
-// 24C04=512, 24C08=1024, 24C16=2048, 24C32=4096, 24C64=8192, etc.
 #define DEV_EEP_MAIN_TOTAL_SIZE    (256U)
+```
+Total EEPROM capacity in bytes. Read from the datasheet. Common values:
+- AT24C01: 128, AT24C02: 256, AT24C04: 512
+- AT24C08: 1024, AT24C16: 2048, AT24C32: 4096
+- AT24C64: 8192, AT24C128: 16384, AT24C256: 32768, AT24C512: 65536
 
-// Page size in bytes. This is CRITICAL — get it wrong and writes will fail.
-// Common values: AT24C01–AT24C02 = 8, AT24C04–AT24C16 = 16
+```c
 #define DEV_EEP_MAIN_PAGE_SIZE     (8U)
 ```
+**This is the most critical setting.** The EEPROM's internal write buffer is this many bytes. If you try to write more than this in one I2C transaction, the excess bytes wrap around to the beginning of the same page — corrupting data silently. `dev_eep` uses this value to split writes safely.
 
-### 4.2 I2C Address (in `dev_eep.c`)
+Common values:
+- AT24C01/02: **8 bytes**
+- AT24C04/08/16: **16 bytes**
+- AT24C32/64: **32 bytes**
+- AT24C128/256: **64 bytes**
+- AT24C512: **128 bytes**
 
-The I2C address and bus are set in the device table inside `dev_eep.c`:
+```c
+#define DEV_EEP_MAIN_PAGE_COUNT    (DEV_EEP_MAIN_TOTAL_SIZE / DEV_EEP_MAIN_PAGE_SIZE)
+```
+Auto-computed. For 256 bytes / 8-byte pages = 32 pages.
+
+### 8.2 I2C Address — in `dev_eep.c`
+
+The 7-bit I2C address is set in the static config table inside `drivers/dev_eep/src/dev_eep.c`:
 
 ```c
 static const dev_eep_config_t s_configs[] = {
     {
         .eep_id        = DEV_EEP_MAIN,
-        .i2c_bus       = DEV_I2C_BUS_EEPROM,
-        .i2c_addr      = 0x50U,              // 7-bit address (unshifted)
+        .i2c_bus       = DEV_I2C_BUS_EEPROM,   // from dev_i2c_cfg.h
+        .i2c_addr      = ((dev_i2c_addr_t)0x50U),  // 7-bit, unshifted
         .total_size    = DEV_EEP_MAIN_TOTAL_SIZE,
         .page_size     = DEV_EEP_MAIN_PAGE_SIZE,
         .mem_addr_size = DEV_EEP_MEM_ADDR_SIZE_8BIT,
@@ -218,86 +288,138 @@ static const dev_eep_config_t s_configs[] = {
 };
 ```
 
-### 4.3 Feature Toggles
+**How to find your EEPROM's address:**
+- 24Cxx base address is `0x50` (7-bit).
+- A0/A1/A2 pins select upper bits: A0→VCC = `0x51`, A1→VCC = `0x52`, etc.
+- Always use the **7-bit** address, not the 8-bit shifted address. Datasheet `0xA0` → code `0x50`.
+
+### 8.3 Memory Address Width — in `dev_eep.c`
 
 ```c
-// CRC-16 integrity check. Strongly recommended.
-#define SVC_EEP_CFG_CRC_ENABLED    DEV_ON
-
-// Auto-read all EEPROM data into RAM mirror during init.
-#define SVC_EEP_CFG_AUTO_READ_ALL_ON_INIT       DEV_ON
-
-// Auto-flush dirty pages during shutdown.
-#define SVC_EEP_CFG_AUTO_FLUSH_ON_SHUTDOWN      DEV_ON
-
-// Skip writes when new data == existing mirror data.
-#define SVC_EEP_CFG_WRITE_ONLY_IF_CHANGED       DEV_ON
-
-// Load defaults when CRC/magic check fails at init.
-#define SVC_EEP_CFG_LOAD_DEFAULTS_ON_INVALID_CRC DEV_ON
+.mem_addr_size = DEV_EEP_MEM_ADDR_SIZE_8BIT,   // ≤2KB chips
+.mem_addr_size = DEV_EEP_MEM_ADDR_SIZE_16BIT,  // ≥4KB chips
 ```
 
-ACK polling, write cycle timing, and page write configuration are in `dev_eep_cfg.h`, not here.
+| Chips | Address width | Enum |
+|-------|--------------|------|
+| AT24C01–AT24C16 | 8-bit (1 byte) | `DEV_EEP_MEM_ADDR_SIZE_8BIT` |
+| AT24C32–AT24C512 | 16-bit (2 bytes) | `DEV_EEP_MEM_ADDR_SIZE_16BIT` |
+| Rare >64KB chips | 24-bit | `DEV_EEP_MEM_ADDR_SIZE_24BIT` |
 
-### 4.4 Providing a Real `dev_delay_ms`
+### 8.4 Service-Level Feature Toggles — in `svc_eep_cfg.h`
 
-The driver needs a millisecond delay for write-cycle timing. Add this to your board file:
+Every toggle is either `DEV_ON` (1) or `DEV_OFF` (0).
 
 ```c
-// In your board's main.c or a board-support file:
+#define SVC_EEP_CFG_RUNTIME_CHECK_ENABLED          DEV_ON
+```
+**ON:** All public API functions validate parameters (null pointers, address ranges, init state).
+**OFF:** Parameter checks are skipped. Smaller/faster code but unsafe. Only disable in extreme flash-constrained situations.
+
+```c
+#define SVC_EEP_CFG_MIRROR_ENABLED                 DEV_ON
+```
+**ON:** Reads come from a RAM mirror. Writes go to the mirror, not to EEPROM. This is the core of the wear-reduction strategy.
+**OFF:** Every read/write goes directly to EEPROM via `dev_eep`. Defeats wear reduction. Only for debugging.
+
+```c
+#define SVC_EEP_CFG_DIRTY_TRACKING_ENABLED         DEV_ON
+```
+**ON:** Each write marks affected pages in a dirty bitmap. Flush only writes dirty pages.
+**OFF:** All pages are always considered dirty. Every flush writes the entire EEPROM. Defeats wear reduction.
+
+```c
+#define SVC_EEP_CFG_CRC_ENABLED                    DEV_ON
+```
+**ON:** CRC-16 is validated on init, and recalculated before each flush/shutdown. Catches data corruption from power loss during writes.
+**OFF:** No CRC check. Saves 2 bytes of EEPROM and some CPU cycles. Only disable if you have another integrity mechanism.
+
+```c
+#define SVC_EEP_CFG_AUTO_READ_ALL_ON_INIT          DEV_ON
+```
+**ON:** `svc_eep_init()` reads the entire EEPROM into the RAM mirror automatically.
+**OFF:** You must call `svc_eep_read_all()` manually after init. Use when you want to defer the I2C read (e.g., to meet a boot-time deadline).
+
+```c
+#define SVC_EEP_CFG_AUTO_FLUSH_ON_SHUTDOWN         DEV_ON
+```
+**ON:** `svc_eep_shutdown()` automatically flushes dirty pages before clearing state.
+**OFF:** You must call `svc_eep_flush()` manually before `svc_eep_shutdown()`. If you forget, dirty data is lost.
+
+```c
+#define SVC_EEP_CFG_WRITE_ONLY_IF_CHANGED          DEV_ON
+```
+**ON:** If `svc_eep_write()` detects the new data is byte-for-byte identical to what's already in the mirror, it returns `DEV_OK` without marking anything dirty. Zero EEPROM wear for redundant writes.
+**OFF:** Every write marks pages dirty, even if the data hasn't changed. Slightly simpler but wears the EEPROM unnecessarily.
+
+```c
+#define SVC_EEP_CFG_LOAD_DEFAULTS_ON_INVALID_CRC   DEV_ON
+```
+**ON:** If CRC or magic check fails at init, the driver loads default values into the mirror (magic, version, boot_count=0, empty device name) and marks all pages dirty. On the next flush, a valid EEPROM image is written. This handles the first-boot-with-blank-EEPROM case automatically.
+**OFF:** CRC/magic failure returns `DEV_ERR_CRC`. Your application must handle it (e.g., by calling a manual "format EEPROM" routine).
+
+### 8.5 Providing a Real `dev_delay_ms`
+
+The driver needs a real millisecond delay. The default weak implementation is a no-op — **you must override it** in your application or board layer:
+
+```c
+/* STM32 + FreeRTOS example */
 #include "dev_common.h"
-#include "stm32h7xx_hal.h"   // vendor HAL — allowed in application/board layer
+#include "stm32h7xx_hal.h"
 
 void dev_delay_ms(uint32_t ms)
 {
-    HAL_Delay(ms);   // STM32
-    // or: vTaskDelay(pdMS_TO_TICKS(ms));  // FreeRTOS
-    // or: esp_rom_delay_us(ms * 1000);    // ESP32
+    HAL_Delay(ms);                         // bare-metal STM32
+    // vTaskDelay(pdMS_TO_TICKS(ms));      // FreeRTOS
+    // esp_rom_delay_us(ms * 1000);        // ESP32
 }
 ```
 
-Without this, the weak default does nothing, and ACK-polling-disabled mode will not wait for write completion (causing data corruption).
+Without this, ACK polling never actually waits (probe loop spins at CPU speed) and the fixed-delay fallback doesn't delay at all.
 
 ---
 
-## 5. How to Add Your Own Fields
+## 9. How to Add Your Own Fields
 
-### Step 1: Add field ID macros in `svc_eep_layout.h`
+### Step 1 — Add field ID macros in `svc_eep_layout.h`
 
 ```c
-// Add your field IDs after the built-in ones:
+/* After the built-in ones (IDs 0–4): */
 #define SVC_EEP_FIELD_MY_SETTINGS          ((svc_eep_field_id_t)5U)
 #define SVC_EEP_FIELD_CALIBRATION_DATA      ((svc_eep_field_id_t)6U)
 #define SVC_EEP_FIELD_SERIAL_NUMBER         ((svc_eep_field_id_t)7U)
 ```
 
-### Step 2: Define offset and size
+### Step 2 — Define offset and size
 
-Pick offsets that don't overlap with existing fields. The first free byte is at `0x002C`:
+First free byte is `0x002C` (44 decimal). Chain your offsets:
 
 ```c
 #define SVC_EEP_LAYOUT_MY_SETTINGS_OFFSET       ((svc_eep_addr_t)0x002CU)
 #define SVC_EEP_LAYOUT_MY_SETTINGS_SIZE         ((svc_eep_size_t)64U)
+/* → ends at 0x002C + 64 = 0x006C */
 
 #define SVC_EEP_LAYOUT_CALIBRATION_OFFSET       ((svc_eep_addr_t)0x006CU)
 #define SVC_EEP_LAYOUT_CALIBRATION_SIZE         ((svc_eep_size_t)128U)
+/* → ends at 0x006C + 128 = 0x00EC */
 
 #define SVC_EEP_LAYOUT_SERIAL_NUMBER_OFFSET     ((svc_eep_addr_t)0x00ECU)
 #define SVC_EEP_LAYOUT_SERIAL_NUMBER_SIZE       ((svc_eep_size_t)16U)
+/* → ends at 0x00EC + 16 = 0x00FC */
 ```
 
-Check: `0x002C + 64 = 0x006C` ✓, `0x006C + 128 = 0x00EC` ✓, `0x00EC + 16 = 0x00FC` ✓ (all under 1024).
+Double-check: `0x00FC ≤ 256` ✓ (all within the EEPROM).
 
-### Step 3: Add entries to the field table in `svc_eep_layout.c`
+### Step 3 — Add entries to the field table in `svc_eep_layout.c`
 
 ```c
 const svc_eep_field_t g_svc_eep_fields[] = {
-    // ... existing fields ...
+    /* ... existing fields ... */
     {
         SVC_EEP_FIELD_MY_SETTINGS,
         SVC_EEP_LAYOUT_MY_SETTINGS_OFFSET,
         SVC_EEP_LAYOUT_MY_SETTINGS_SIZE,
-        "my_settings"
+        "my_settings"          // debug name
     },
     {
         SVC_EEP_FIELD_CALIBRATION_DATA,
@@ -314,508 +436,375 @@ const svc_eep_field_t g_svc_eep_fields[] = {
 };
 ```
 
-The `name` field is for debugging only — it appears in error logs.
+### Step 4 — Validate
 
-### Step 4: Validate
-
-The `svc_eep_init()` function automatically validates the field table at init — it will return `DEV_ERR_CONFIG` if any fields overlap or go out of bounds. No manual checking needed.
+`svc_eep_init()` automatically checks for overlaps and out-of-bounds fields. If it returns `DEV_ERR_CONFIG`, one of your offsets or sizes is wrong.
 
 ---
 
-## 6. Usage Examples
+## 10. Usage Examples
 
-### 6.1 Minimal Boot Counter
-
-The simplest real-world use: count how many times the device has powered on.
-
-```c
-#include "svc_eep.h"
-#include "dev_i2c.h"
-
-int main(void)
-{
-    dev_err_t  err;
-    uint32_t   boot_count;
-
-    // 1. Initialize I2C, then EEPROM
-    dev_i2c_init();
-    err = svc_eep_init();
-    if (err != DEV_OK) {
-        // On first boot with blank EEPROM, defaults are loaded
-        // (if SVC_EEP_CFG_LOAD_DEFAULTS_ON_INVALID_CRC is ON)
-        // boot_count starts at 0
-    }
-
-    // 2. Read current boot count
-    err = svc_eep_read_u32(SVC_EEP_FIELD_BOOT_COUNT, &boot_count);
-    if (err != DEV_OK) {
-        // handle error
-    }
-
-    // 3. Increment and save
-    boot_count++;
-    err = svc_eep_write_u32(SVC_EEP_FIELD_BOOT_COUNT, boot_count);
-    if (err != DEV_OK) {
-        // handle error
-    }
-
-    // 4. Shutdown — writes dirty pages to EEPROM
-    svc_eep_shutdown();
-
-    printf("Boot count: %lu\n", (unsigned long)boot_count);
-}
-```
-
-### 6.2 Device Name (String Field)
-
-Store a human-readable device identifier.
-
-```c
-void set_device_name(const char *name)
-{
-    size_t len = strlen(name);
-
-    if (len >= SVC_EEP_LAYOUT_DEVICE_NAME_SIZE) {
-        // Name too long — truncation would lose the null terminator
-        return;
-    }
-
-    // Write the string + null terminator. Only writes up to the field size.
-    svc_eep_write_field(SVC_EEP_FIELD_DEVICE_NAME,
-                        name,
-                        (svc_eep_size_t)(len + 1U));
-}
-
-void get_device_name(char *buf, size_t buf_size)
-{
-    svc_eep_read_field(SVC_EEP_FIELD_DEVICE_NAME,
-                       buf,
-                       (svc_eep_size_t)buf_size);
-    // Ensure null termination even if EEPROM data is corrupt
-    buf[buf_size - 1U] = '\0';
-}
-```
-
-### 6.3 Settings Struct (Multi-Byte Field)
-
-Store a configuration struct as a single EEPROM field.
-
-```c
-// Define your settings struct (in your application code)
-typedef struct {
-    uint8_t  brightness;    // 0–100
-    uint8_t  volume;        // 0–100
-    uint16_t auto_off_min;  // auto power-off after N minutes
-    uint32_t baud_rate;     // UART baud rate
-} device_settings_t;
-
-// Compile-time check that it fits in your EEPROM field
-_Static_assert(sizeof(device_settings_t) <= SVC_EEP_LAYOUT_MY_SETTINGS_SIZE,
-               "Settings struct too large for EEPROM field");
-
-dev_err_t load_settings(device_settings_t *settings)
-{
-    return svc_eep_read_field(SVC_EEP_FIELD_MY_SETTINGS,
-                              settings,
-                              sizeof(device_settings_t));
-}
-
-dev_err_t save_settings(const device_settings_t *settings)
-{
-    return svc_eep_write_field(SVC_EEP_FIELD_MY_SETTINGS,
-                               settings,
-                               sizeof(device_settings_t));
-}
-
-// Usage:
-device_settings_t settings;
-if (load_settings(&settings) == DEV_OK) {
-    // Use settings...
-}
-```
-
-### 6.4 Manual Flush (Write-Intensive Applications)
-
-If your application writes frequently, don't flush on every write. Batch changes and flush periodically or at safe points.
-
-```c
-void update_sensor_log(uint32_t value)
-{
-    // Write to mirror only — fast, no I2C
-    svc_eep_write_u32(SVC_EEP_FIELD_SENSOR_LATEST, value);
-
-    // Only flush every 100 updates to reduce EEPROM wear
-    static uint32_t update_count = 0;
-    update_count++;
-
-    if ((update_count % 100U) == 0U) {
-        svc_eep_flush(SVC_EEP_MAIN);
-    }
-}
-
-// Always flush remaining changes before shutdown:
-void on_shutdown(void)
-{
-    if (svc_eep_is_dirty(SVC_EEP_MAIN)) {
-        uint16_t dirty = svc_eep_get_dirty_page_count(SVC_EEP_MAIN);
-        printf("Flushing %u dirty pages...\n", dirty);
-        svc_eep_flush(SVC_EEP_MAIN);
-    }
-    svc_eep_shutdown();
-}
-```
-
-### 6.5 Error Handling Pattern
-
-Every `svc_eep` API returns `dev_err_t`. Always check.
-
-```c
-dev_err_t err;
-
-err = svc_eep_write_u32(SVC_EEP_FIELD_BOOT_COUNT, new_count);
-switch (err) {
-case DEV_OK:
-    break;  // success
-case DEV_ERR_NOT_INITIALIZED:
-    // Forgot to call svc_eep_init()
-    break;
-case DEV_ERR_INVALID_ARG:
-    // Invalid field ID — check your SVC_EEP_FIELD_* constant
-    break;
-case DEV_ERR_OUT_OF_RANGE:
-    // Data larger than the field — check your field size definitions
-    break;
-case DEV_ERR_CRC:
-    // EEPROM data is corrupt — consider loading defaults
-    break;
-case DEV_ERR_TIMEOUT:
-    // EEPROM not responding — check I2C wiring and address
-    break;
-default:
-    // Unexpected error — log and investigate
-    break;
-}
-```
-
-### 6.6 Full Application Example
+### 10.1 Minimal Boot Counter
 
 ```c
 #include "svc_eep.h"
 #include "dev_i2c.h"
 #include "dev_common.h"
 #include <stdio.h>
-#include <string.h>
 
-// ── Provide real delay (STM32 example) ──
-void dev_delay_ms(uint32_t ms)
-{
-    HAL_Delay(ms);
-}
+/* Required: provide a real delay */
+void dev_delay_ms(uint32_t ms) { HAL_Delay(ms); }
 
-// ── Application ──
 int main(void)
 {
     dev_err_t  err;
     uint32_t   boot_count;
-    char       name[SVC_EEP_LAYOUT_DEVICE_NAME_SIZE];
 
-    // ── Hardware init ──
+    /* 1. Hardware + I2C init (vendor/board layer) */
     HAL_Init();
     SystemClock_Config();
-    MX_I2C1_Init();   // STM32 CubeMX-generated I2C init
+    MX_I2C1_Init();
 
-    // ── Driver init ──
+    /* 2. Initialize I2C bus driver */
     err = dev_i2c_init();
-    if (err != DEV_OK) {
-        printf("I2C init failed: %d\n", err);
-        return 1;
-    }
+    if (err != DEV_OK) { printf("I2C: %d\n", err); return 1; }
 
+    /* 3. Initialize EEPROM service (probes chip, reads mirror, validates CRC) */
     err = svc_eep_init();
-    if (err != DEV_OK && err != DEV_ERR_CRC) {
-        // DEV_ERR_CRC is OK on first boot (blank EEPROM → defaults loaded)
-        printf("EEPROM init failed: %d\n", err);
+    if (err != DEV_OK) {
+        /* On first-ever boot with blank EEPROM, defaults are loaded and
+         * init still returns DEV_OK (if LOAD_DEFAULTS_ON_INVALID_CRC is ON).
+         * If it returns an error here, the EEPROM is genuinely unreachable. */
+        printf("EEPROM: %d\n", err);
         return 1;
     }
 
-    // ── Boot count ──
-    svc_eep_read_u32(SVC_EEP_FIELD_BOOT_COUNT, &boot_count);
+    /* 4. Read boot count, increment, save to mirror */
+    err = svc_eep_read_u32(SVC_EEP_FIELD_BOOT_COUNT, &boot_count);
+    if (err != DEV_OK) { printf("read: %d\n", err); return 1; }
+
     boot_count++;
-    svc_eep_write_u32(SVC_EEP_FIELD_BOOT_COUNT, boot_count);
+    err = svc_eep_write_u32(SVC_EEP_FIELD_BOOT_COUNT, boot_count);
+    if (err != DEV_OK) { printf("write: %d\n", err); return 1; }
+
     printf("Boot #%lu\n", (unsigned long)boot_count);
 
-    // ── Set device name on first boot ──
-    svc_eep_read_field(SVC_EEP_FIELD_DEVICE_NAME, name, sizeof(name));
-    name[sizeof(name) - 1U] = '\0';
-
-    if (name[0] == '\0') {
-        // First boot — set a default name
-        svc_eep_write_field(SVC_EEP_FIELD_DEVICE_NAME,
-                            "MyDevice",
-                            (svc_eep_size_t)(strlen("MyDevice") + 1U));
-        printf("Device name set to: MyDevice\n");
-    } else {
-        printf("Device name: %s\n", name);
-    }
-
-    // ── Flush changes to EEPROM now (optional — shutdown does it too) ──
-    if (svc_eep_is_dirty(SVC_EEP_MAIN)) {
-        printf("Flushing %u dirty pages...\n",
-               svc_eep_get_dirty_page_count(SVC_EEP_MAIN));
-        svc_eep_flush(SVC_EEP_MAIN);
-    }
-
-    // ── Application main loop ──
-    while (1) {
-        // Your application logic here...
-    }
-
-    // ── Clean shutdown (reached on reset/power-down) ──
+    /* 5. Shutdown — flushes dirty pages (including boot_count) to EEPROM */
     svc_eep_shutdown();
+
     return 0;
+}
+```
+
+### 10.2 Device Name (String Field)
+
+```c
+void set_device_name(const char *name)
+{
+    size_t len = strlen(name);
+    if (len >= SVC_EEP_LAYOUT_DEVICE_NAME_SIZE) return;  // too long
+
+    svc_eep_write_field(SVC_EEP_FIELD_DEVICE_NAME,
+                        name,
+                        (svc_eep_size_t)(len + 1U));  // include null terminator
+}
+
+void get_device_name(char *buf, size_t buf_size)
+{
+    svc_eep_read_field(SVC_EEP_FIELD_DEVICE_NAME, buf,
+                       (svc_eep_size_t)buf_size);
+    buf[buf_size - 1U] = '\0';  // safety: always null-terminate
+}
+```
+
+### 10.3 Settings Struct (Multi-Byte Field)
+
+```c
+typedef struct {
+    uint8_t  brightness;      // 0–100
+    uint8_t  volume;          // 0–100
+    uint16_t auto_off_min;    // auto power-off after N minutes
+    uint32_t baud_rate;       // UART baud rate
+} device_settings_t;
+
+/* Compile-time size check */
+_Static_assert(sizeof(device_settings_t) <= SVC_EEP_LAYOUT_MY_SETTINGS_SIZE,
+               "Settings struct too large for EEPROM field");
+
+dev_err_t load_settings(device_settings_t *s)
+{
+    return svc_eep_read_field(SVC_EEP_FIELD_MY_SETTINGS,
+                              s, sizeof(device_settings_t));
+}
+
+dev_err_t save_settings(const device_settings_t *s)
+{
+    return svc_eep_write_field(SVC_EEP_FIELD_MY_SETTINGS,
+                               s, sizeof(device_settings_t));
+}
+```
+
+### 10.4 Manual Flush Control (Write-Intensive Applications)
+
+```c
+void update_sensor_log(uint32_t value)
+{
+    /* Write to mirror only — fast, zero I2C traffic */
+    svc_eep_write_u32(SVC_EEP_FIELD_SENSOR_LATEST, value);
+
+    /* Only flush every 100 updates to reduce EEPROM wear */
+    static uint32_t update_count = 0;
+    update_count++;
+
+    if ((update_count % 100U) == 0U) {
+        svc_eep_flush();   // writes only dirty pages to EEPROM
+    }
+}
+
+/* Always flush remaining changes before shutdown */
+void on_shutdown(void)
+{
+    if (svc_eep_is_dirty(SVC_EEP_MAIN)) {
+        uint16_t dirty = svc_eep_get_dirty_page_count(SVC_EEP_MAIN);
+        printf("Flushing %u dirty pages...\n", dirty);
+        svc_eep_flush();
+    }
+    svc_eep_shutdown();   // also flushes if AUTO_FLUSH_ON_SHUTDOWN is ON
+}
+```
+
+### 10.5 Raw Mirror Access (Advanced)
+
+```c
+/* Read/write raw bytes to the RAM mirror at a specific address.
+ * Useful for bulk operations or accessing data outside the field table. */
+uint8_t buf[16];
+svc_eep_read(SVC_EEP_MAIN, 0x0080U, buf, 16U);   // reads from mirror
+svc_eep_write(SVC_EEP_MAIN, 0x0080U, buf, 16U);  // writes to mirror, marks dirty
+
+/* Check if anything needs flushing */
+if (svc_eep_is_dirty(SVC_EEP_MAIN)) {
+    svc_eep_flush();
+}
+```
+
+### 10.6 Error Handling — Every Return Code
+
+```c
+dev_err_t err = svc_eep_write_u32(SVC_EEP_FIELD_BOOT_COUNT, new_count);
+switch (err) {
+case DEV_OK:
+    break;  // success — data in mirror, pages marked dirty
+case DEV_ERR_NOT_INITIALIZED:
+    // Forgot to call svc_eep_init(), or called after svc_eep_shutdown()
+    break;
+case DEV_ERR_INVALID_ARG:
+    // Invalid field_id, or length > field size, or zero-length write
+    break;
+case DEV_ERR_NULL_PTR:
+    // data pointer is NULL
+    break;
+case DEV_ERR_OUT_OF_RANGE:
+    // address + length exceeds mirror size
+    break;
+case DEV_ERR_CONFIG:
+    // Field layout overlap or device config mismatch (caught at init)
+    break;
+case DEV_ERR_CRC:
+    // CRC check failed at init (only if LOAD_DEFAULTS_ON_INVALID_CRC is OFF)
+    break;
+default:
+    // Unexpected — log and investigate
+    break;
 }
 ```
 
 ---
 
-## 7. API Reference
+## 11. API Reference
 
-### 7.1 Lifecycle
+### 11.1 Lifecycle
 
-```c
-dev_err_t svc_eep_init(void);
-```
-Initialize the driver. Reads all EEPROM data into the RAM mirror, validates the magic number and CRC (if enabled), and loads defaults if the EEPROM is blank or corrupt. Returns `DEV_ERR_ALREADY_INITIALIZED` if called twice without a `svc_eep_shutdown()` or `svc_eep_deinit()` in between.
+| Function | Description |
+|----------|-------------|
+| `svc_eep_init()` | Probe chip via dev_eep, read all into mirror, validate magic/CRC, load defaults if needed |
+| `svc_eep_shutdown()` | Update CRC, flush all dirty pages, deinit dev_eep, clear state |
+| `svc_eep_deinit()` | Clear mirror and dirty map without flushing (abandon changes) |
+| `svc_eep_is_initialized()` | Returns `true` if init was called and not yet shutdown |
 
-```c
-dev_err_t svc_eep_shutdown(void);
-```
-Update CRC, flush all dirty pages to physical EEPROM, and clear the initialized state. Returns `DEV_ERR_NOT_INITIALIZED` if the driver wasn't initialized. If any flush fails, the state is NOT cleared (so you can retry). Safe to call even if nothing is dirty — it's a no-op flush.
+### 11.2 Field-Based Access
 
-```c
-dev_err_t svc_eep_deinit(void);
-```
-Clear the RAM mirror and dirty map without writing anything to EEPROM. Use this if you want to abandon changes and reset to a clean state.
+| Function | Description |
+|----------|-------------|
+| `svc_eep_read_field(id, data, len)` | Read from a named field in the mirror. `len` can be ≤ field size |
+| `svc_eep_write_field(id, data, len)` | Write to a named field in the mirror. Marks pages dirty |
+| `svc_eep_get_field_info(id, &field)` | Get pointer to field descriptor (offset, size, name) |
 
-```c
-bool svc_eep_is_initialized(void);
-```
-Returns `true` if `svc_eep_init()` has been called (and not yet shut down).
-
-### 7.2 Raw Read/Write (operate on raw EEPROM addresses)
+### 11.3 Typed Helpers
 
 ```c
-dev_err_t svc_eep_read(svc_eep_id_t eep_id, svc_eep_addr_t addr,
-                       uint8_t *data, svc_eep_size_t length);
+dev_err_t svc_eep_read_u8 (svc_eep_field_id_t id, uint8_t  *value);
+dev_err_t svc_eep_write_u8(svc_eep_field_id_t id, uint8_t   value);
+
+dev_err_t svc_eep_read_u16 (svc_eep_field_id_t id, uint16_t *value);
+dev_err_t svc_eep_write_u16(svc_eep_field_id_t id, uint16_t  value);
+
+dev_err_t svc_eep_read_u32 (svc_eep_field_id_t id, uint32_t *value);
+dev_err_t svc_eep_write_u32(svc_eep_field_id_t id, uint32_t  value);
 ```
-Copy `length` bytes from the RAM mirror starting at `addr` into `data`. Reads from RAM, not from the physical EEPROM.
+
+These are thin wrappers — they pass `sizeof(type)` as the length. The field must be at least as large as the type.
+
+### 11.4 Raw Mirror Access
+
+| Function | Description |
+|----------|-------------|
+| `svc_eep_read(eep_id, addr, data, len)` | Copy from mirror at `addr` into `data`. No I2C traffic |
+| `svc_eep_write(eep_id, addr, data, len)` | Copy `data` into mirror at `addr`. Marks pages dirty. No I2C traffic |
+
+### 11.5 Flush
 
 ```c
-dev_err_t svc_eep_write(svc_eep_id_t eep_id, svc_eep_addr_t addr,
-                        const uint8_t *data, svc_eep_size_t length);
+dev_err_t svc_eep_flush(void);
 ```
-Copy `data` into the RAM mirror at `addr`. Marks affected pages dirty. Does NOT write to physical EEPROM. If the new data is identical to what's already in the mirror, this is a no-op (returns `DEV_OK` without marking anything dirty).
+Write all dirty pages to physical EEPROM via `dev_eep_write()`. Each dirty page is written individually. If a write fails, the dirty bit is preserved (not cleared) so a retry will re-write that page. Returns `DEV_OK` if nothing was dirty.
 
-```c
-dev_err_t svc_eep_read_all(svc_eep_id_t eep_id);
-```
-Re-read the entire EEPROM into the RAM mirror. Clears the dirty map. Use this to discard pending changes and sync with the physical EEPROM.
+### 11.6 Dirty State
 
-```c
-dev_err_t svc_eep_write_all(svc_eep_id_t eep_id);
-```
-Write the ENTIRE mirror to physical EEPROM, page by page, regardless of dirty state. This is a full rewrite — use sparingly. For normal use, prefer `svc_eep_flush()`.
-
-```c
-dev_err_t svc_eep_flush(svc_eep_id_t eep_id);
-```
-Write only dirty pages to physical EEPROM. Each page is written individually with write-cycle waits. If a page write fails, the dirty bit is preserved (not cleared) so it can be retried. Returns the first error encountered.
-
-### 7.3 Field-Based Access (operate by field ID)
-
-```c
-dev_err_t svc_eep_read_field(svc_eep_field_id_t field_id,
-                             void *data, svc_eep_size_t length);
-```
-Read from a named field. `length` can be less than or equal to the field size (for partial reads). Returns `DEV_ERR_INVALID_ARG` if the field ID doesn't exist or if `length` exceeds the field size.
-
-```c
-dev_err_t svc_eep_write_field(svc_eep_field_id_t field_id,
-                              const void *data, svc_eep_size_t length);
-```
-Write to a named field. `length` can be less than or equal to the field size (for partial writes). Delegates to `svc_eep_write()` — compare-before-write and dirty tracking apply.
-
-```c
-dev_err_t svc_eep_get_field_info(svc_eep_field_id_t field_id,
-                                 const svc_eep_field_t **field);
-```
-Get a pointer to the field descriptor (offset, size, name). Useful for debugging or generic field iteration.
-
-### 7.4 Typed Access (convenience wrappers)
-
-```c
-dev_err_t svc_eep_read_u8 (svc_eep_field_id_t field_id, uint8_t  *value);
-dev_err_t svc_eep_write_u8(svc_eep_field_id_t field_id, uint8_t   value);
-
-dev_err_t svc_eep_read_u16 (svc_eep_field_id_t field_id, uint16_t *value);
-dev_err_t svc_eep_write_u16(svc_eep_field_id_t field_id, uint16_t  value);
-
-dev_err_t svc_eep_read_u32 (svc_eep_field_id_t field_id, uint32_t *value);
-dev_err_t svc_eep_write_u32(svc_eep_field_id_t field_id, uint32_t  value);
-```
-These are thin wrappers around `svc_eep_read_field` / `svc_eep_write_field`. They pass `sizeof(uintX_t)` as the length. The field must be at least as large as the type (e.g., don't call `read_u32` on a 2-byte field).
-
-### 7.5 Dirty State
-
-```c
-bool svc_eep_is_dirty(svc_eep_id_t eep_id);
-```
-Returns `true` if any page in the dirty map is set (i.e., there are unflushed changes).
-
-```c
-dev_err_t svc_eep_mark_dirty(svc_eep_id_t eep_id,
-                             svc_eep_addr_t addr, svc_eep_size_t length);
-```
-Manually mark pages covering `[addr, addr+length)` as dirty. Normally you don't need this — `svc_eep_write()` calls it automatically. Use when you modify the mirror through some other mechanism.
-
-```c
-dev_err_t svc_eep_clear_dirty(svc_eep_id_t eep_id);
-```
-Clear all dirty bits without writing to EEPROM. Use with caution — this discards the knowledge of what needs flushing.
-
-```c
-uint16_t svc_eep_get_dirty_page_count(svc_eep_id_t eep_id);
-```
-Return how many pages are currently dirty. Useful for progress reporting during flush.
+| Function | Description |
+|----------|-------------|
+| `svc_eep_is_dirty(eep_id)` | `true` if any page has unflushed changes |
+| `svc_eep_mark_dirty(eep_id, addr, len)` | Manually mark pages dirty (normally automatic) |
+| `svc_eep_clear_dirty(eep_id)` | Clear all dirty bits without writing to EEPROM (discard changes) |
+| `svc_eep_get_dirty_page_count(eep_id)` | How many pages are dirty (for progress reporting) |
 
 ---
 
-## 8. Porting to a New Board
+## 12. Full Application Example (STM32 + FreeRTOS)
 
-### Checklist
+```c
+#include "svc_eep.h"
+#include "dev_i2c.h"
+#include "dev_common.h"
+#include "cmsis_os.h"       // FreeRTOS via CubeMX
+#include <stdio.h>
+#include <string.h>
 
-1. **Wire the EEPROM.** Connect SDA, SCL, VCC, GND. Set A0/A1/A2 address pins as needed. Add pull-up resistors (typically 4.7kΩ) on SDA and SCL if not already present.
+/* ── Real delay (FreeRTOS) ── */
+void dev_delay_ms(uint32_t ms)
+{
+    osDelay(ms);
+}
 
-2. **Configure the I2C bus.** In `dev_i2c_cfg.h`, ensure `DEV_I2C_BUS_EEPROM` is mapped to the correct hardware I2C peripheral. If not already defined, define it:
-   ```c
-   #define DEV_I2C_BUS_EEPROM   ((dev_i2c_bus_t)0U)   // or whichever bus it's on
-   ```
+/* ── Application settings stored in EEPROM ── */
+typedef struct {
+    uint8_t  brightness;
+    uint8_t  volume;
+    uint16_t auto_off_min;
+} app_settings_t;
 
-3. **Set EEPROM parameters.** In `svc_eep_cfg.h`:
-   - `SVC_EEP_MAIN_TOTAL_SIZE` — match your chip
-   - `SVC_EEP_MAIN_PAGE_SIZE` — match your chip's datasheet
-   - `SVC_EEP_MAIN_PAGE_COUNT` — auto-computed
-   - `SVC_EEP_MAIN_DIRTY_MAP_SIZE` — auto-computed
+_Static_assert(sizeof(app_settings_t) <= SVC_EEP_LAYOUT_MY_SETTINGS_SIZE,
+               "Settings too large");
 
-4. **Set I2C address.** In `svc_eep.c`, in the `s_devices[]` table, set `.i2c_addr` to match your hardware wiring (7-bit address).
+/* ── Boot task ── */
+void boot_task(void *arg)
+{
+    (void)arg;
+    dev_err_t  err;
+    uint32_t   boot_count;
+    char       name[SVC_EEP_LAYOUT_DEVICE_NAME_SIZE];
 
-5. **Set memory address size.** In `svc_eep.c`, in `s_devices[]`, set `.mem_addr_size`:
-   - `SVC_EEP_MEM_ADDR_SIZE_8BIT` for 24C01–24C16
-   - `SVC_EEP_MEM_ADDR_SIZE_16BIT` for 24C32 and larger
+    /* 1. Init I2C bus */
+    err = dev_i2c_init();
+    configASSERT(err == DEV_OK);
 
-6. **Provide `dev_delay_ms()`.** Implement the real delay function (see §4.6).
+    /* 2. Init EEPROM service */
+    err = svc_eep_init();
+    configASSERT(err == DEV_OK);
 
-7. **Build and test.** Run the host tests first (`tests/svc_eep/`), then flash to hardware and verify init succeeds.
+    /* 3. Boot count */
+    svc_eep_read_u32(SVC_EEP_FIELD_BOOT_COUNT, &boot_count);
+    boot_count++;
+    svc_eep_write_u32(SVC_EEP_FIELD_BOOT_COUNT, boot_count);
+    printf("[BOOT] #%lu\n", (unsigned long)boot_count);
 
-### EEPROM Compatibility Table
+    /* 4. Device name (set on first boot) */
+    svc_eep_read_field(SVC_EEP_FIELD_DEVICE_NAME, name, sizeof(name));
+    name[sizeof(name) - 1U] = '\0';
+    if (name[0] == '\0') {
+        svc_eep_write_field(SVC_EEP_FIELD_DEVICE_NAME,
+                            "Controller-A",
+                            (svc_eep_size_t)(strlen("Controller-A") + 1U));
+        printf("[BOOT] First boot — name set to Controller-A\n");
+    } else {
+        printf("[BOOT] Device: %s\n", name);
+    }
 
-| Chip | Size | Page | Address bytes | I2C addr range | Notes |
-|------|------|------|---------------|----------------|-------|
-| 24C01 | 128B | 8 | 1 (8-bit) | 0x50–0x57 | |
-| 24C02 | 256B | 8 | 1 (8-bit) | 0x50–0x57 | |
-| 24C04 | 512B | 16 | 1 (8-bit) | 0x50–0x53 | Uses address pin for upper address bit |
-| 24C08 | 1024B | 16 | 1 (8-bit) | 0x50–0x51 | Uses address pin for upper address bits |
-| 24C16 | 2048B | 16 | 1 (8-bit) | 0x50 only | All address pins used for addressing |
-| 24C32 | 4096B | 32 | 2 (16-bit) | 0x50–0x57 | |
-| 24C64 | 8192B | 32 | 2 (16-bit) | 0x50–0x57 | |
-| 24C128 | 16KB | 64 | 2 (16-bit) | 0x50–0x57 | |
-| 24C256 | 32KB | 64 | 2 (16-bit) | 0x50–0x57 | |
-| 24C512 | 64KB | 128 | 2 (16-bit) | 0x50–0x57 | |
+    /* 5. Flush persisted data now (so it survives a crash later) */
+    svc_eep_flush();
 
----
+    /* 6. Start main application */
+    start_main_tasks();
+    vTaskDelete(NULL);
+}
 
-## 9. Safety Notes
-
-### EEPROM Wear
-- Each EEPROM byte is rated for 100,000–1,000,000 write cycles.
-- The driver writes only dirty pages, only on explicit flush. If you flush on every write, you defeat the wear reduction. Batch writes and flush infrequently.
-- Identical data is never rewritten — the compare-before-write check prevents pointless wear.
-
-### Power Loss During Write
-- If power is lost during a page write, that page may be partially written or corrupted. The CRC check on next boot will detect this.
-- With `SVC_EEP_CFG_LOAD_DEFAULTS_ON_INVALID_CRC` enabled, a corrupt EEPROM causes defaults to load. Your application should handle this gracefully.
-- The dirty bit is only cleared after a successful page write — if a flush is interrupted, retrying will re-write the failed pages.
-
-### Endianness
-- Multi-byte values (magic, version, CRC, boot count) are stored in little-endian byte order (native for ARM Cortex-M). If the EEPROM is shared with a big-endian system, byte swapping is needed.
-
-### Stack Usage
-- The I2C write path uses a stack buffer of `SVC_EEP_MAIN_PAGE_SIZE + 4` bytes (default: 20 bytes). Large page sizes increase stack usage.
-
-### Reentrancy
-- The driver is **not** reentrant. Do not call svc_eep functions from interrupts or multiple RTOS tasks without external locking.
-
----
-
-## 10. Bring-Up Checklist
-
-- [ ] EEPROM wired correctly (SDA, SCL, VCC, GND, address pins, pull-ups)
-- [ ] `DEV_I2C_BUS_EEPROM` defined in `dev_i2c_cfg.h`
-- [ ] EEPROM total size and page size match the datasheet
-- [ ] I2C address (7-bit) correct in the device table
-- [ ] Memory address size (8/16/24/32-bit) correct
-- [ ] `dev_delay_ms()` implemented (not relying on weak no-op)
-- [ ] `dev_i2c_init()` succeeds (I2C bus works)
-- [ ] `svc_eep_init()` succeeds (or returns DEV_ERR_CRC on first blank boot)
-- [ ] Read a known field and verify the value
-- [ ] Write a field, flush, power cycle, read back — value persists
-- [ ] Host tests pass: `cd tests/svc_eep/build && cmake .. && make && ./eep_test_host`
+/* ── Shutdown hook (called before reset/power-off) ── */
+void shutdown_hook(void)
+{
+    printf("[SHUTDOWN] Saving EEPROM...\n");
+    svc_eep_shutdown();   // updates CRC, flushes dirty pages, deinits
+    printf("[SHUTDOWN] Done.\n");
+}
+```
 
 ---
 
-## 11. Troubleshooting
+## 13. Porting to a New Board
 
-| Symptom | Likely Cause | Fix |
+1. **Wire the EEPROM.** SDA, SCL, VCC, GND. Set A0/A1/A2 address pins. Add 4.7kΩ pull-ups on SDA/SCL if not already present.
+2. **Configure I2C.** In `dev_i2c_cfg.h`, define `DEV_I2C_BUS_EEPROM` to map to the correct hardware I2C peripheral.
+3. **Set EEPROM parameters.** In `dev_eep_cfg.h`: `DEV_EEP_MAIN_TOTAL_SIZE`, `DEV_EEP_MAIN_PAGE_SIZE`.
+4. **Set I2C address and address width.** In `dev_eep.c` in the `s_configs[]` table.
+5. **Provide `dev_delay_ms()`.** Real implementation (HAL tick, RTOS delay, or busy-wait).
+6. **Build and test.** Run host tests first, then flash to hardware and verify `svc_eep_init()` returns `DEV_OK`.
+
+---
+
+## 14. Troubleshooting
+
+| Symptom | Likely cause | Fix |
 |---------|-------------|-----|
-| `DEV_ERR_NOT_INITIALIZED` | Forgot to call `svc_eep_init()` | Call `svc_eep_init()` after `dev_i2c_init()` |
-| `DEV_ERR_ALREADY_INITIALIZED` | Called `svc_eep_init()` twice | Call `svc_eep_shutdown()` before re-initializing |
-| `DEV_ERR_CONFIG` on init | Field layout overlap or out-of-bounds | Check your field offsets and sizes in `svc_eep_layout.h` |
-| `DEV_ERR_CRC` on init | EEPROM is blank or data is corrupt | Normal on first boot if `LOAD_DEFAULTS_ON_INVALID_CRC` is OFF. Enable it for first-boot handling. |
-| `DEV_ERR_TIMEOUT` on flush | EEPROM not responding (ACK polling timed out) | Check I2C wiring, address, pull-up resistors. Try increasing `ACK_POLL_TIMEOUT_MS`. |
-| `DEV_ERR_NO_ACK` | I2C device not found at the configured address | Verify the 7-bit address matches your hardware. Check SDA/SCL connections. |
-| Data not persisting after power cycle | `svc_eep_shutdown()` not called, or flush failed silently | Always check return values. Verify dirty pages are cleared after flush. |
-| EEPROM wears out quickly | Flushing too frequently | Batch writes. Call `svc_eep_flush()` infrequently, not after every `svc_eep_write()`. |
-| `DEV_ERR_OUT_OF_RANGE` | Address + length exceeds EEPROM size | Check your `SVC_EEP_MAIN_TOTAL_SIZE` and field offset/size definitions. |
+| `DEV_ERR_NOT_INITIALIZED` | Forgot `svc_eep_init()` or `dev_i2c_init()` | Call them in order: `dev_i2c_init()` → `svc_eep_init()` |
+| `DEV_ERR_ALREADY_INITIALIZED` | Called `svc_eep_init()` twice | Call `svc_eep_shutdown()` before re-init |
+| `DEV_ERR_CONFIG` on init | Field layout overlap or out-of-bounds | Check offsets/sizes in `svc_eep_layout.h` |
+| `DEV_ERR_CRC` on init | EEPROM blank or data corrupt | Enable `LOAD_DEFAULTS_ON_INVALID_CRC` or handle manually |
+| `DEV_ERR_TIMEOUT` on init/flush | EEPROM not responding | Check wiring, pull-ups, I2C address, bus speed |
+| `DEV_ERR_NO_ACK` | Wrong I2C address or device not powered | Verify 7-bit address. Check VCC/GND. |
+| Data lost after power cycle | `svc_eep_shutdown()` not called | Always call shutdown before power-off |
+| EEPROM wears out quickly | Flushing too often | Batch writes, flush infrequently. Check `WRITE_ONLY_IF_CHANGED` is `DEV_ON` |
+| `DEV_ERR_OUT_OF_RANGE` | Address + length exceeds EEPROM size | Check `DEV_EEP_MAIN_TOTAL_SIZE` matches chip |
 
----
+## 15. Design Rationale
 
-## 12. Design Decisions & Rationale
+**Why a RAM mirror?** Eliminates all I2C traffic during normal operation. Reads are instant (memcpy). Trade-off: RAM usage (256 bytes for AT24C02 — negligible).
 
-**Why a RAM mirror instead of reading EEPROM on every access?**
-EEPROM reads are fast, but reads through I2C add latency and bus contention. Keeping a mirror eliminates all I2C traffic during normal operation. The trade-off is RAM usage (1KB for a 24C08), which is negligible on modern MCUs.
+**Why not write-through?** EEPROM has limited write endurance (~1M cycles per byte). Writing immediately on every change would wear out frequently-updated fields. Batching writes extends EEPROM life dramatically.
 
-**Why not write-through (write to EEPROM immediately)?**
-EEPROM has limited write endurance. Writing immediately on every change would wear out frequently-updated fields (like boot counters). Batching writes and flushing infrequently dramatically extends EEPROM life.
+**Why CRC-16 not CRC-32?** CRC-16 uses 2 bytes vs 4. For small EEPROMs, saving 2 bytes matters. CRC-16 catches all single-bit, double-bit, and burst errors up to 16 bits — adequate for EEPROM integrity.
 
-**Why CRC-16 instead of CRC-32?**
-CRC-16 uses 2 bytes versus CRC-32's 4 bytes. For small EEPROMs (128–2048 bytes), saving 2 bytes matters. CRC-16 catches all single-bit, double-bit, and burst errors up to 16 bits — adequate for EEPROM data integrity.
+**Why ACK polling (in dev_eep) not fixed delays?** The EEPROM ignores I2C traffic during its internal write cycle. Polling waits exactly as long as needed — no guesswork, no wasted time.
 
-**Why ACK polling instead of fixed delays?**
-Fixed delays are pessimistic (you always wait the worst-case time) or risky (you might not wait long enough). ACK polling is exact — you wait exactly as long as the EEPROM needs, and no longer.
-
----
-
-## 13. Source Files
+## 16. Source Files
 
 | File | Purpose |
 |------|---------|
-| `services/svc_eep/include/svc_eep.h` | Public API declarations |
-| `services/svc_eep/include/svc_eep_types.h` | Type definitions |
-| `services/svc_eep/include/svc_eep_cfg.h` | Compile-time configuration (service-level) |
-| `services/svc_eep/include/svc_eep_layout.h` | Field IDs, offsets, sizes |
-| `services/svc_eep/src/svc_eep.c` | Full implementation |
+| `services/svc_eep/include/svc_eep.h` | Public API |
+| `services/svc_eep/include/svc_eep_types.h` | `svc_eep_device_t`, `svc_eep_field_t` |
+| `services/svc_eep/include/svc_eep_cfg.h` | Service-level feature toggles |
+| `services/svc_eep/include/svc_eep_layout.h` | Field IDs, offsets, sizes, magic/version constants |
+| `services/svc_eep/src/svc_eep.c` | Full implementation (mirror, dirty tracking, CRC, field ops) |
 | `services/svc_eep/src/svc_eep_layout.c` | Field descriptor table |
 | `drivers/dev_eep/include/dev_eep.h` | Device-level EEPROM driver API |
-| `drivers/dev_eep/include/dev_eep_cfg.h` | Device-level configuration (dimensions, I2C addr) |
-| `drivers/dev_eep/src/dev_eep.c` | Device-level implementation (I2C, page handling) |
+| `drivers/dev_eep/include/dev_eep_cfg.h` | Device dimensions, I2C addr, page size, timing |
+| `drivers/dev_eep/src/dev_eep.c` | Device-level implementation (I2C, page splitting, ACK polling) |
 | `tests/dev_eep/test_eep.c` | 24 host-based unit tests |

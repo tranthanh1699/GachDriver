@@ -1,5 +1,6 @@
 #include "app_lifecycle.h"
-
+#include "svc_shell.h"
+#include "svc_eep.h"
 /**
  * @brief Application lifecycle implementation.
  *
@@ -10,10 +11,25 @@
  * system state machine. See app_lifecycle.h for details.
  */
 
+dev_err_t app_write_eep(uint8_t argc, char *argv[])
+{
+    svc_shell_write_line("Test Write"); 
+    return DEV_OK;
+}
+
+svc_shell_cmd_t test_write_cmd = {
+    .name = "test_write",
+    .help = "Write test data to EEPROM",
+    .usage = "test_write <field_id> <value>",
+    .function = app_write_eep, 
+};
+
+
 dev_err_t app_init(void)
 {
     /* TODO: Add application initialization logic here */
-
+    
+    svc_shell_register_command(&test_write_cmd); 
     return DEV_OK;
 }
 

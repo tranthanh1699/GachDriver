@@ -4,6 +4,7 @@
 #include "svc_shell.h"
 #include "app_lifecycle.h"
 #include "dev_uart_cfg.h"
+#include "dev_i2c.h"
 
 /* ── Wrappers for APIs that require arguments ── */
 
@@ -16,6 +17,28 @@ static dev_err_t svc_sm_shell_init_wrapper(void)
 
 const svc_sm_module_t g_svc_sm_modules[] =
 {
+    {
+        "dev_i2c",
+        dev_i2c_init,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        true  /* critical — if I2C fails, we can't access EEPROM */
+    },
+    {
+        "svc_eep",
+        svc_eep_init,
+        NULL,
+        NULL,
+        NULL,
+        svc_eep_shutdown,
+        svc_eep_deinit,
+        NULL,
+        true  /* critical — if EEPROM fails, we can't save state */ 
+    },
     {
         "svc_shell",
         svc_sm_shell_init_wrapper,
@@ -38,6 +61,7 @@ const svc_sm_module_t g_svc_sm_modules[] =
         app_error,       /* error_handler — called once in ERROR state */
         true             /* critical — app failure is fatal */
     },
+
 };
 
 const uint16_t g_svc_sm_module_count =
