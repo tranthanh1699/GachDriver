@@ -96,26 +96,8 @@ int main(void)
   MX_USART1_UART_Init();
   MX_I2C2_Init();
   /* USER CODE BEGIN 2 */
-
-  // svc_sm_init();
-  // svc_sm_startup();
-
-  dev_err_t err = dev_i2c_init(); 
-  uint8_t datatest[10]; 
-  err = dev_i2c_mem_read(DEV_I2C_BUS_EEPROM, 
-    0x50, 
-    0x00, 
-    DEV_I2C_MEM_ADDR_SIZE_8BIT, 
-    datatest,
-    4,
-    DEV_I2C_TIMEOUT_DEFAULT_MS); 
-
-  datatest[0] = 1; 
-  datatest[1] = 2; 
-  datatest[2] = 3; 
-  datatest[3] = 4; 
-
-  err = dev_i2c_mem_write(DEV_I2C_BUS_EEPROM, 0x50, 0x00, DEV_I2C_MEM_ADDR_SIZE_8BIT, datatest, 4, DEV_I2C_TIMEOUT_DEFAULT_MS); 
+  svc_sm_init();
+  svc_sm_startup();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -125,8 +107,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    // svc_sm_handle();
-
+    svc_sm_handle();
   }
   /* USER CODE END 3 */
 }

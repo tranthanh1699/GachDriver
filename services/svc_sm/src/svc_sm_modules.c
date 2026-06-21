@@ -5,6 +5,7 @@
 #include "app_lifecycle.h"
 #include "dev_uart_cfg.h"
 #include "dev_i2c.h"
+#include "dev_eep.h"
 
 /* ── Wrappers for APIs that require arguments ── */
 
@@ -37,7 +38,7 @@ const svc_sm_module_t g_svc_sm_modules[] =
         svc_eep_shutdown,
         svc_eep_deinit,
         NULL,
-        true  /* critical — if EEPROM fails, we can't save state */ 
+        false  /* critical — if EEPROM fails, we can't save state */ 
     },
     {
         "svc_shell",
