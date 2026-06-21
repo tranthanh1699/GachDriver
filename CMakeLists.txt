@@ -56,6 +56,7 @@ add_subdirectory(drivers/dev_ringbuf)
 add_subdirectory(drivers/dev_uart)
 add_subdirectory(drivers/dev_log)
 add_subdirectory(drivers/dev_adc)
+add_subdirectory(drivers/dev_eep)
 
 # Add platform modules
 add_subdirectory(platform/osal)
@@ -77,6 +78,7 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     dev_uart
     dev_log
     dev_adc
+    dev_eep
 
     # Add platform modules
     osal

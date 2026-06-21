@@ -392,11 +392,11 @@ TEST(21_dirty_page_count)
 
     (void)svc_eep_clear_dirty(SVC_EEP_MAIN);
 
-    /* Write across 2 pages (page_size = 16, 32 bytes = 2 pages) */
+    /* Write across 4 pages (page_size = 8, 32 bytes = 4 pages) */
     (void)memset(data, 0xABU, sizeof(data));
     CHECK_ERR(svc_eep_write(SVC_EEP_MAIN, 80U, data, 32U), DEV_OK, "write 32 bytes");
 
-    CHECK_EQ(svc_eep_get_dirty_page_count(SVC_EEP_MAIN), 2U, "2 dirty pages");
+    CHECK_EQ(svc_eep_get_dirty_page_count(SVC_EEP_MAIN), 4U, "4 dirty pages");
     printf("    PASS\n"); g_passes++;
 }
 

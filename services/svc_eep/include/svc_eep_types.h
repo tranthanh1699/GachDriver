@@ -6,20 +6,12 @@ extern "C" {
 #endif
 
 #include "dev_types.h"
-#include "dev_i2c_types.h"
+#include "dev_eep_types.h"
 
 typedef uint8_t  svc_eep_id_t;
 typedef uint32_t svc_eep_addr_t;
 typedef uint32_t svc_eep_size_t;
 typedef uint16_t svc_eep_field_id_t;
-
-typedef enum
-{
-    SVC_EEP_MEM_ADDR_SIZE_8BIT = 0,
-    SVC_EEP_MEM_ADDR_SIZE_16BIT,
-    SVC_EEP_MEM_ADDR_SIZE_24BIT,
-    SVC_EEP_MEM_ADDR_SIZE_32BIT
-} svc_eep_mem_addr_size_t;
 
 typedef struct
 {
@@ -29,19 +21,18 @@ typedef struct
     const char        *name;
 } svc_eep_field_t;
 
+/*
+ * Service-level device descriptor.
+ * Device-level details (I2C bus, I2C addr, page size, etc.) are owned by dev_eep.
+ * svc_eep owns only the RAM mirror and dirty map.
+ */
 typedef struct
 {
-    svc_eep_id_t            eep_id;
-    dev_i2c_bus_t           i2c_bus;
-    dev_i2c_addr_t          i2c_addr;
-    svc_eep_size_t          total_size;
-    svc_eep_size_t          page_size;
-    svc_eep_mem_addr_size_t mem_addr_size;
-    uint32_t                write_cycle_time_ms;
-    uint8_t                *mirror;
-    svc_eep_size_t          mirror_size;
-    uint8_t                *dirty_map;
-    svc_eep_size_t          dirty_map_size;
+    svc_eep_id_t  eep_id;
+    uint8_t      *mirror;
+    svc_eep_size_t mirror_size;
+    uint8_t      *dirty_map;
+    svc_eep_size_t dirty_map_size;
 } svc_eep_device_t;
 
 #ifdef __cplusplus

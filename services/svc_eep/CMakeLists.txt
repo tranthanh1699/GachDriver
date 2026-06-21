@@ -4,4 +4,4 @@ add_library(svc_eep STATIC
 )
 
 target_include_directories(svc_eep PUBLIC include)
-target_link_libraries(svc_eep PUBLIC dev_common dev_i2c dev_crc)
+target_link_libraries(svc_eep PUBLIC dev_common dev_eep dev_crc)

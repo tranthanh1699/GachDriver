@@ -1,10 +1,12 @@
-# svc_eep — I2C EEPROM Driver
+# svc_eep — EEPROM Service
 
 ## 1. What Is It?
 
-`svc_eep` is a safe, wear-reducing service layer for external I2C EEPROM chips (24Cxx, 25Cxx, and similar). Instead of reading and writing the physical EEPROM on every access, it keeps a **RAM mirror** of the entire EEPROM content. Your application reads and writes the mirror; only when you explicitly flush (or shut down) are changed bytes written back to the physical chip.
+`svc_eep` is a safe, wear-reducing service layer for external I2C EEPROM chips (24Cxx and similar). Instead of reading and writing the physical EEPROM on every access, it keeps a **RAM mirror** of the entire EEPROM content. Your application reads and writes the mirror; only when you explicitly flush (or shut down) are changed bytes written back to the physical chip.
 
 This protects EEPROM lifetime — each byte in an EEPROM has a finite number of write cycles (typically 100,000–1,000,000). Writing only changed pages, and only when you say so, dramatically reduces wear.
+
+`svc_eep` delegates all I2C communication to `dev_eep` (the EEPROM device driver), which in turn uses `dev_i2c`. `svc_eep` never calls I2C APIs directly.
 
 ### Key features
 
@@ -32,16 +34,20 @@ This protects EEPROM lifetime — each byte in an EEPROM has a finite number of 
                   └──────┬──────┘
                          │ svc_eep_read / svc_eep_write (to/from RAM only!)
                   ┌──────▼──────┐
-                  │  RAM mirror │  1024 bytes (or whatever your EEPROM size is)
-                  │  + dirty map│  8 bytes (1 bit per page)
+                  │  RAM mirror │  256 bytes (configurable)
+                  │  + dirty map│  4 bytes (1 bit per page)
                   └──────┬──────┘
-                         │ svc_eep_flush / svc_eep_shutdown (writes dirty pages)
+                         │ svc_eep_flush / svc_eep_shutdown
                   ┌──────▼──────┐
-                  │   dev_i2c   │
+                  │   dev_eep   │  page splitting, ACK polling, address width
+                  └──────┬──────┘
+                         │ dev_eep_read / dev_eep_write
+                  ┌──────▼──────┐
+                  │   dev_i2c   │  I2C bus abstraction
                   └──────┬──────┘
                          │ I2C bus
                   ┌──────▼──────┐
-                  │ EEPROM chip │  Physical 24C08 / 24C16 / etc.
+                  │ EEPROM chip │  Physical AT24C02 / 24C08 / etc.
                   └─────────────┘
 ```
 
@@ -51,10 +57,13 @@ This protects EEPROM lifetime — each byte in an EEPROM has a finite number of 
 POWER ON
    │
    ▼
-dev_i2c_init()          ← initialize the I2C bus
+dev_i2c_init()          ← initialize the I2C bus (port layer)
    │
    ▼
-svc_eep_init()          ← reads entire EEPROM → RAM mirror
+dev_eep_init()          ← probe EEPROM on I2C bus (called by svc_eep_init)
+   │
+   ▼
+svc_eep_init()          ← reads entire EEPROM → RAM mirror via dev_eep
    │                     ← validates magic, version, CRC
    │                     ← loads defaults if EEPROM is blank/corrupt
    │
@@ -175,103 +184,62 @@ The CRC is recalculated and written just before each flush/shutdown.
 
 ## 4. Configuration Guide
 
-All configuration is in `services/svc_eep/include/svc_eep_cfg.h`. You MUST edit this file before compiling — the defaults are for a 24C08 (1024-byte, 16-byte page) EEPROM.
+Service-level configuration is in `services/svc_eep/include/svc_eep_cfg.h`. EEPROM device-level configuration (dimensions, I2C address, page size) is in `drivers/dev_eep/include/dev_eep_cfg.h`.
 
-### 4.1 EEPROM Dimensions (REQUIRED — match your chip's datasheet)
+### 4.1 EEPROM Dimensions (in `dev_eep_cfg.h`)
+
+Set the EEPROM chip dimensions in `drivers/dev_eep/include/dev_eep_cfg.h`:
 
 ```c
 // Total EEPROM size in bytes. Check your chip: 24C01=128, 24C02=256,
 // 24C04=512, 24C08=1024, 24C16=2048, 24C32=4096, 24C64=8192, etc.
-#define SVC_EEP_MAIN_TOTAL_SIZE    (1024U)
+#define DEV_EEP_MAIN_TOTAL_SIZE    (256U)
 
 // Page size in bytes. This is CRITICAL — get it wrong and writes will fail.
-// Common values: 24C01–24C16 = 16, 24C32–24C64 = 32, 24C128–24C512 = 64 or 128
-#define SVC_EEP_MAIN_PAGE_SIZE     (16U)
+// Common values: AT24C01–AT24C02 = 8, AT24C04–AT24C16 = 16
+#define DEV_EEP_MAIN_PAGE_SIZE     (8U)
 ```
 
-### 4.2 I2C Address (match your hardware wiring)
+### 4.2 I2C Address (in `dev_eep.c`)
 
-The I2C address is set in the device table inside `svc_eep.c`:
+The I2C address and bus are set in the device table inside `dev_eep.c`:
 
 ```c
-// In svc_eep.c, the static device table:
-static const svc_eep_device_t s_devices[] = {
+static const dev_eep_config_t s_configs[] = {
     {
-        .eep_id        = SVC_EEP_MAIN,
-        .i2c_bus       = DEV_I2C_BUS_EEPROM,   // defined in dev_i2c_cfg.h
-        .i2c_addr      = 0x50U,                 // 7-bit address (unshifted)
-        .total_size    = SVC_EEP_MAIN_TOTAL_SIZE,
-        .page_size     = SVC_EEP_MAIN_PAGE_SIZE,
-        .mem_addr_size = SVC_EEP_MEM_ADDR_SIZE_16BIT,
-        // ...
+        .eep_id        = DEV_EEP_MAIN,
+        .i2c_bus       = DEV_I2C_BUS_EEPROM,
+        .i2c_addr      = 0x50U,              // 7-bit address (unshifted)
+        .total_size    = DEV_EEP_MAIN_TOTAL_SIZE,
+        .page_size     = DEV_EEP_MAIN_PAGE_SIZE,
+        .mem_addr_size = DEV_EEP_MEM_ADDR_SIZE_8BIT,
+        .write_cycle_time_ms = 5U,
     },
 };
 ```
 
-**How to find your EEPROM's I2C address:**
-- 24Cxx series: base address is `0x50` (7-bit). The A0/A1/A2 pins select the upper bits.
-  - All address pins to GND → `0x50`
-  - A0 to VCC → `0x51`, A1 to VCC → `0x52`, etc.
-- Check your schematic. The address in the code is the **7-bit** address, NOT the 8-bit shifted address. If your datasheet says `0xA0`, the 7-bit address is `0x50`.
-
-### 4.3 Memory Address Size (match your chip)
+### 4.3 Feature Toggles
 
 ```c
-// Which EEPROMs use which address size:
-//   8-bit:  24C01–24C16  (up to 2048 bytes — single address byte)
-//  16-bit:  24C32–24C512 (4096–65536 bytes — two address bytes)
-//  24-bit:  Rare, very large EEPROMs (>64KB)
-//  32-bit:  Extremely rare
-//
-// Set in the device table, not in cfg.h:
-//   .mem_addr_size = SVC_EEP_MEM_ADDR_SIZE_16BIT,
-```
-
-### 4.4 Feature Toggles
-
-```c
-// Maximum number of EEPROM chips on the board.
-// Increase if you have multiple EEPROMs.
-#define SVC_EEP_CFG_MAX_DEVICES    (1U)
-
 // CRC-16 integrity check. Strongly recommended.
-// Disable only if you need the 2 bytes for something else.
-#define SVC_EEP_CFG_CRC_ENABLED    DEV_ON   // or DEV_OFF
+#define SVC_EEP_CFG_CRC_ENABLED    DEV_ON
 
 // Auto-read all EEPROM data into RAM mirror during init.
-// Almost always want this ON.
 #define SVC_EEP_CFG_AUTO_READ_ALL_ON_INIT       DEV_ON
 
 // Auto-flush dirty pages during shutdown.
-// Turn OFF if you want manual control over when flushing happens.
 #define SVC_EEP_CFG_AUTO_FLUSH_ON_SHUTDOWN      DEV_ON
 
 // Skip writes when new data == existing mirror data.
-// This is the core wear-reduction feature. Keep ON.
 #define SVC_EEP_CFG_WRITE_ONLY_IF_CHANGED       DEV_ON
 
-// When CRC/magic check fails at init, load default values into the mirror
-// (instead of returning DEV_ERR_CRC). Useful for first-boot with blank EEPROM.
+// Load defaults when CRC/magic check fails at init.
 #define SVC_EEP_CFG_LOAD_DEFAULTS_ON_INVALID_CRC DEV_ON
-
-// ACK polling: after a write, poll the EEPROM until it ACKs (write done).
-// More reliable than fixed delays. Keep ON unless you have a specific reason.
-#define SVC_EEP_CFG_ACK_POLLING_ENABLED          DEV_ON
 ```
 
-### 4.5 Timing
+ACK polling, write cycle timing, and page write configuration are in `dev_eep_cfg.h`, not here.
 
-```c
-// EEPROM write cycle time in milliseconds (from datasheet). Typically 5ms.
-// Used only as fallback when ACK polling is disabled.
-#define SVC_EEP_CFG_DEFAULT_WRITE_CYCLE_TIME_MS  (5U)
-
-// How long to poll for ACK after a write before giving up.
-// Default 10ms is enough for most EEPROMs (max write cycle is 5–10ms).
-#define SVC_EEP_CFG_ACK_POLL_TIMEOUT_MS          (10U)
-```
-
-### 4.6 Providing a Real `dev_delay_ms`
+### 4.4 Providing a Real `dev_delay_ms`
 
 The driver needs a millisecond delay for write-cycle timing. Add this to your board file:
 
@@ -843,8 +811,11 @@ Fixed delays are pessimistic (you always wait the worst-case time) or risky (you
 |------|---------|
 | `services/svc_eep/include/svc_eep.h` | Public API declarations |
 | `services/svc_eep/include/svc_eep_types.h` | Type definitions |
-| `services/svc_eep/include/svc_eep_cfg.h` | Compile-time configuration |
+| `services/svc_eep/include/svc_eep_cfg.h` | Compile-time configuration (service-level) |
 | `services/svc_eep/include/svc_eep_layout.h` | Field IDs, offsets, sizes |
 | `services/svc_eep/src/svc_eep.c` | Full implementation |
 | `services/svc_eep/src/svc_eep_layout.c` | Field descriptor table |
-| `tests/svc_eep/test_eep.c` | 24 host-based unit tests |
+| `drivers/dev_eep/include/dev_eep.h` | Device-level EEPROM driver API |
+| `drivers/dev_eep/include/dev_eep_cfg.h` | Device-level configuration (dimensions, I2C addr) |
+| `drivers/dev_eep/src/dev_eep.c` | Device-level implementation (I2C, page handling) |
+| `tests/dev_eep/test_eep.c` | 24 host-based unit tests |
