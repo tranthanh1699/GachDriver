@@ -7,7 +7,7 @@ extern "C" {
 
 #include "svc_eep_types.h"
 #include "svc_eep_cfg.h"
-#include "svc_eep_layout.h"
+#include "svc_eep_blocks.h"
 #include "dev_error.h"
 
 /* ── Lifecycle ── */
@@ -15,36 +15,38 @@ extern "C" {
 /**
  * @brief Initialize the EEPROM service.
  *
- * Initializes dev_eep, reads all EEPROM data into the RAM mirror,
- * validates magic/version/CRC, and loads defaults if needed.
+ * Validates the block configuration table, initializes dev_eep,
+ * and sets up per-block runtime state. Does NOT read the entire
+ * EEPROM. Blocks are loaded on demand via svc_eep_load_block()
+ * or svc_eep_read_block().
  *
  * @return DEV_OK on success.
  * @return DEV_ERR_ALREADY_INITIALIZED if already initialized.
- * @return DEV_ERR_CONFIG if device configuration is invalid.
+ * @return DEV_ERR_CONFIG if block configuration is invalid.
  * @return DEV_ERR_TIMEOUT if EEPROM does not respond.
  */
 dev_err_t svc_eep_init(void);
 
 /**
- * @brief Shutdown the EEPROM service.
+ * @brief Deinitialize the EEPROM service without syncing.
  *
- * Flushes dirty pages to EEPROM (if auto-flush is enabled),
- * updates CRC, and clears initialized state.
- *
- * @return DEV_OK on success.
- * @return DEV_ERR_NOT_INITIALIZED if not initialized.
- */
-dev_err_t svc_eep_shutdown(void);
-
-/**
- * @brief Deinitialize the EEPROM service without flushing.
- *
- * Clears RAM mirror and dirty map. Does not write to EEPROM.
+ * Clears all block runtime states. Does not write to EEPROM.
  *
  * @return DEV_OK on success.
  * @return DEV_ERR_NOT_INITIALIZED if not initialized.
  */
 dev_err_t svc_eep_deinit(void);
+
+/**
+ * @brief Shutdown the EEPROM service.
+ *
+ * Syncs all dirty blocks to EEPROM (if auto-sync is enabled),
+ * then deinitializes dev_eep.
+ *
+ * @return DEV_OK on success.
+ * @return DEV_ERR_NOT_INITIALIZED if not initialized.
+ */
+dev_err_t svc_eep_shutdown(void);
 
 /**
  * @brief Check if the EEPROM service is initialized.
@@ -53,126 +55,195 @@ dev_err_t svc_eep_deinit(void);
  */
 bool svc_eep_is_initialized(void);
 
-/* ── Field-based read/write ── */
+/* ── Block load ── */
 
 /**
- * @brief Read from a named field in the RAM mirror.
+ * @brief Load a single block from EEPROM into its RAM mirror.
  *
- * @param field_id Field identifier.
- * @param data     Output buffer.
- * @param length   Number of bytes to read (must be <= field size).
+ * Reads only the configured EEPROM range for this block via
+ * dev_eep_read(). Does not read other blocks or the whole EEPROM.
+ *
+ * After a successful load:
+ *   loaded = true
+ *   valid  = true
+ *   dirty  = false
+ *
+ * @param block_id Block identifier (from svc_eep_block_id_t enum).
  *
  * @return DEV_OK on success.
- * @return DEV_ERR_INVALID_ARG if field_id is invalid or length > field size.
+ * @return DEV_ERR_INVALID_ARG if block_id is invalid.
+ * @return DEV_ERR_NOT_INITIALIZED if not initialized.
+ * @return DEV_ERR_TIMEOUT if EEPROM read fails.
+ */
+dev_err_t svc_eep_load_block(svc_eep_block_id_t block_id);
+
+/* ── Block read ── */
+
+/**
+ * @brief Read data from a block's RAM mirror.
+ *
+ * If the block is not yet loaded, loads it from EEPROM first.
+ * The length must equal the configured block size.
+ *
+ * @param block_id Block identifier.
+ * @param data     Output buffer (caller-owned).
+ * @param length   Number of bytes to read (must match block size).
+ *
+ * @return DEV_OK on success.
+ * @return DEV_ERR_INVALID_ARG if block_id is invalid or length mismatch.
  * @return DEV_ERR_NULL_PTR if data is NULL.
  * @return DEV_ERR_NOT_INITIALIZED if not initialized.
  */
-dev_err_t svc_eep_read_field(svc_eep_field_id_t field_id,
+dev_err_t svc_eep_read_block(svc_eep_block_id_t block_id,
                              void *data,
-                             svc_eep_size_t length);
+                             uint16_t length);
+
+/* ── Direct write (immediate EEPROM write) ── */
 
 /**
- * @brief Write to a named field in the RAM mirror.
+ * @brief Write data directly to EEPROM by block ID.
  *
- * Marks affected pages dirty. Does not write to physical EEPROM
- * until flush() or shutdown() is called.
+ * Writes immediately to physical EEPROM via dev_eep_write().
+ * Does not require the mirror to be loaded first.
+ * If the block mirror is loaded, updates it and marks it clean.
  *
- * @param field_id Field identifier.
+ * Use this when data must be persisted immediately.
+ *
+ * @param block_id Block identifier.
  * @param data     Data to write.
- * @param length   Number of bytes to write (must be <= field size).
+ * @param length   Number of bytes to write (must match block size).
  *
  * @return DEV_OK on success.
- * @return DEV_ERR_INVALID_ARG if field_id is invalid or length > field size.
+ * @return DEV_ERR_INVALID_ARG if block_id is invalid or length mismatch.
  * @return DEV_ERR_NULL_PTR if data is NULL.
- * @return DEV_ERR_NOT_INITIALIZED if not initialized.
- */
-dev_err_t svc_eep_write_field(svc_eep_field_id_t field_id,
-                              const void *data,
-                              svc_eep_size_t length);
-
-/**
- * @brief Get field descriptor by ID.
- *
- * @param field_id Field identifier.
- * @param field    Output pointer to field descriptor.
- *
- * @return DEV_OK on success.
- * @return DEV_ERR_INVALID_ARG if field_id is not found.
- * @return DEV_ERR_NULL_PTR if field is NULL.
- */
-dev_err_t svc_eep_get_field_info(svc_eep_field_id_t field_id,
-                                 const svc_eep_field_t **field);
-
-/* ── Typed read/write ── */
-
-dev_err_t svc_eep_read_u8(svc_eep_field_id_t field_id, uint8_t *value);
-dev_err_t svc_eep_write_u8(svc_eep_field_id_t field_id, uint8_t value);
-
-dev_err_t svc_eep_read_u16(svc_eep_field_id_t field_id, uint16_t *value);
-dev_err_t svc_eep_write_u16(svc_eep_field_id_t field_id, uint16_t value);
-
-dev_err_t svc_eep_read_u32(svc_eep_field_id_t field_id, uint32_t *value);
-dev_err_t svc_eep_write_u32(svc_eep_field_id_t field_id, uint32_t value);
-
-/* ── Flush ── */
-
-/**
- * @brief Write all dirty pages to physical EEPROM.
- *
- * Iterates over the dirty map and writes each dirty page via dev_eep_write().
- * Dirty bits are cleared only after successful writes.
- *
- * @return DEV_OK on success.
  * @return DEV_ERR_NOT_INITIALIZED if not initialized.
  * @return DEV_ERR_TIMEOUT if EEPROM write fails.
  */
-dev_err_t svc_eep_flush(void);
+dev_err_t svc_eep_write_direct(svc_eep_block_id_t block_id,
+                               const void *data,
+                               uint16_t length);
 
-/* ── Raw read/write (RAM mirror) ── */
-
-/**
- * @brief Read raw bytes from the RAM mirror.
- *
- * Reads from RAM only — does not access the physical EEPROM.
- *
- * @param eep_id Logical EEPROM ID.
- * @param addr   Byte address within the mirror.
- * @param data   Output buffer.
- * @param length Number of bytes to read.
- *
- * @return DEV_OK on success.
- */
-dev_err_t svc_eep_read(svc_eep_id_t eep_id,
-                       svc_eep_addr_t addr,
-                       uint8_t *data,
-                       svc_eep_size_t length);
+/* ── Mirror write (RAM only, deferred EEPROM write) ── */
 
 /**
- * @brief Write raw bytes to the RAM mirror.
+ * @brief Write data to a block's RAM mirror only.
  *
- * Writes to RAM only — does not access the physical EEPROM.
- * Marks affected pages dirty.
+ * Copies data into the block's RAM mirror and marks the block dirty.
+ * Does NOT write to physical EEPROM until svc_eep_sync_block() or
+ * svc_eep_sync_all() is called.
  *
- * @param eep_id Logical EEPROM ID.
- * @param addr   Byte address within the mirror.
- * @param data   Data to write.
- * @param length Number of bytes to write.
+ * Use this to reduce EEPROM write cycles when data changes frequently.
+ *
+ * @param block_id Block identifier.
+ * @param data     Data to write.
+ * @param length   Number of bytes to write (must match block size).
  *
  * @return DEV_OK on success.
+ * @return DEV_ERR_INVALID_ARG if block_id is invalid or length mismatch.
+ * @return DEV_ERR_NULL_PTR if data is NULL.
+ * @return DEV_ERR_NOT_INITIALIZED if not initialized.
  */
-dev_err_t svc_eep_write(svc_eep_id_t eep_id,
-                        svc_eep_addr_t addr,
-                        const uint8_t *data,
-                        svc_eep_size_t length);
+dev_err_t svc_eep_write_mirror(svc_eep_block_id_t block_id,
+                               const void *data,
+                               uint16_t length);
 
-/* ── Dirty state ── */
+/* ── Mirror pointer access ── */
 
-bool      svc_eep_is_dirty(svc_eep_id_t eep_id);
-dev_err_t svc_eep_mark_dirty(svc_eep_id_t eep_id,
-                             svc_eep_addr_t addr,
-                             svc_eep_size_t length);
-dev_err_t svc_eep_clear_dirty(svc_eep_id_t eep_id);
-uint16_t  svc_eep_get_dirty_page_count(svc_eep_id_t eep_id);
+/**
+ * @brief Get a direct pointer to a block's RAM mirror.
+ *
+ * Ensures the block is loaded, then returns a pointer to its RAM
+ * mirror and the block size. Useful for in-place struct access.
+ *
+ * If the application modifies data through the returned pointer,
+ * it MUST call svc_eep_mark_dirty() afterwards.
+ *
+ * @param block_id Block identifier.
+ * @param ptr      Output pointer to RAM mirror.
+ * @param length   Output block size in bytes.
+ *
+ * @return DEV_OK on success.
+ * @return DEV_ERR_INVALID_ARG if block_id is invalid.
+ * @return DEV_ERR_NULL_PTR if ptr or length is NULL.
+ * @return DEV_ERR_NOT_INITIALIZED if not initialized.
+ */
+dev_err_t svc_eep_get_mirror_ptr(svc_eep_block_id_t block_id,
+                                 void **ptr,
+                                 uint16_t *length);
+
+/**
+ * @brief Mark a block as dirty without writing data.
+ *
+ * Use this after modifying a block's RAM mirror through a pointer
+ * obtained via svc_eep_get_mirror_ptr().
+ *
+ * The block must be loaded before marking dirty.
+ *
+ * @param block_id Block identifier.
+ *
+ * @return DEV_OK on success.
+ * @return DEV_ERR_INVALID_ARG if block_id is invalid.
+ * @return DEV_ERR_INVALID_STATE if block is not loaded.
+ * @return DEV_ERR_NOT_INITIALIZED if not initialized.
+ */
+dev_err_t svc_eep_mark_dirty(svc_eep_block_id_t block_id);
+
+/* ── Sync (write dirty mirrors to EEPROM) ── */
+
+/**
+ * @brief Sync a single dirty block to EEPROM.
+ *
+ * If the block is not dirty, returns DEV_OK without writing.
+ * Writes the block's RAM mirror to EEPROM via dev_eep_write().
+ * Clears the dirty flag after a successful write.
+ *
+ * @param block_id Block identifier.
+ *
+ * @return DEV_OK on success.
+ * @return DEV_ERR_INVALID_ARG if block_id is invalid.
+ * @return DEV_ERR_NOT_INITIALIZED if not initialized.
+ * @return DEV_ERR_TIMEOUT if EEPROM write fails.
+ */
+dev_err_t svc_eep_sync_block(svc_eep_block_id_t block_id);
+
+/**
+ * @brief Sync all dirty blocks to EEPROM.
+ *
+ * Iterates through all configured blocks and syncs only dirty ones.
+ * Skips clean blocks. Does not write unused EEPROM areas.
+ *
+ * @return DEV_OK on success.
+ * @return DEV_ERR_NOT_INITIALIZED if not initialized.
+ * @return DEV_ERR_TIMEOUT if any block sync fails.
+ */
+dev_err_t svc_eep_sync_all(void);
+
+/* ── State queries ── */
+
+/**
+ * @brief Check if a specific block is loaded.
+ *
+ * @param block_id Block identifier.
+ *
+ * @return true if the block RAM mirror contains valid data.
+ */
+bool svc_eep_is_block_loaded(svc_eep_block_id_t block_id);
+
+/**
+ * @brief Check if a specific block is dirty.
+ *
+ * @param block_id Block identifier.
+ *
+ * @return true if the block RAM mirror differs from EEPROM.
+ */
+bool svc_eep_is_block_dirty(svc_eep_block_id_t block_id);
+
+/**
+ * @brief Check if any configured block is dirty.
+ *
+ * @return true if at least one block is dirty.
+ */
+bool svc_eep_is_dirty(void);
 
 #ifdef __cplusplus
 }

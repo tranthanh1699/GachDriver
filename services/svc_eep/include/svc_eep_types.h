@@ -6,34 +6,25 @@ extern "C" {
 #endif
 
 #include "dev_types.h"
-#include "dev_eep_types.h"
 
-typedef uint8_t  svc_eep_id_t;
-typedef uint32_t svc_eep_addr_t;
-typedef uint32_t svc_eep_size_t;
-typedef uint16_t svc_eep_field_id_t;
+/* ── Block configuration descriptor (static, read-only) ── */
 
 typedef struct
 {
-    svc_eep_field_id_t field_id;
-    svc_eep_addr_t     offset;
-    svc_eep_size_t     size;
-    const char        *name;
-} svc_eep_field_t;
+    uint8_t        block_id;
+    uint32_t       eep_offset;
+    uint16_t       block_size;
+    uint8_t       *mirror;
+} svc_eep_block_cfg_t;
 
-/*
- * Service-level device descriptor.
- * Device-level details (I2C bus, I2C addr, page size, etc.) are owned by dev_eep.
- * svc_eep owns only the RAM mirror and dirty map.
- */
+/* ── Block runtime state (mutable) ── */
+
 typedef struct
 {
-    svc_eep_id_t  eep_id;
-    uint8_t      *mirror;
-    svc_eep_size_t mirror_size;
-    uint8_t      *dirty_map;
-    svc_eep_size_t dirty_map_size;
-} svc_eep_device_t;
+    bool loaded;
+    bool dirty;
+    bool valid;
+} svc_eep_block_state_t;
 
 #ifdef __cplusplus
 }

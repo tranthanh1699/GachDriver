@@ -5,35 +5,23 @@
 extern "C" {
 #endif
 
-#include "svc_eep_types.h"
 #include "dev_compiler.h"
 #include "dev_eep_cfg.h"
 
-/* ── Feature toggles (service-level only) ── */
+/* ── Feature toggles ── */
 
-#define SVC_EEP_CFG_RUNTIME_CHECK_ENABLED          DEV_ON
-#define SVC_EEP_CFG_MIRROR_ENABLED                 DEV_ON
-#define SVC_EEP_CFG_DIRTY_TRACKING_ENABLED         DEV_ON
-#define SVC_EEP_CFG_CRC_ENABLED                    DEV_ON
-#define SVC_EEP_CFG_AUTO_READ_ALL_ON_INIT          DEV_ON
-#define SVC_EEP_CFG_AUTO_FLUSH_ON_SHUTDOWN         DEV_ON
-#define SVC_EEP_CFG_WRITE_ONLY_IF_CHANGED          DEV_ON
-#define SVC_EEP_CFG_LOAD_DEFAULTS_ON_INVALID_CRC   DEV_ON
+#define SVC_EEP_CFG_RUNTIME_CHECK_ENABLED              DEV_ON
+#define SVC_EEP_CFG_AUTO_SYNC_ON_SHUTDOWN              DEV_ON
 
-/* ── Device IDs (alias dev_eep IDs for convenience) ── */
+/* ── Block limits ── */
 
-enum
-{
-    SVC_EEP_MAIN = DEV_EEP_MAIN,
-    SVC_EEP_CFG_MAX_DEVICES
-};
+#define SVC_EEP_CFG_MAX_BLOCKS                         (16U)
 
-/* ── Dirty map size (computed from dev_eep page count) ── */
+/* ── Mirror allocation mode ── */
 
-#define SVC_EEP_MAIN_DIRTY_MAP_SIZE \
-    ((DEV_EEP_MAIN_PAGE_COUNT + 7U) / 8U)
+#define SVC_EEP_CFG_DYNAMIC_MIRROR_ENABLED             DEV_OFF
 
-/* ── Backward-compatible aliases (delegated to dev_eep) ── */
+/* ── Backward-compatible EEPROM dimension aliases ── */
 
 #define SVC_EEP_MAIN_TOTAL_SIZE    DEV_EEP_MAIN_TOTAL_SIZE
 #define SVC_EEP_MAIN_PAGE_SIZE     DEV_EEP_MAIN_PAGE_SIZE
