@@ -366,10 +366,18 @@ dev_err_t svc_eep_init(void)
         result = dev_eep_init((dev_eep_id_t)s_devices[i].eep_id);
         if (result != DEV_OK)
         {
+            /* Clean up any dev_eep devices already initialized */
+            if (i > 0U)
+            {
+                uint8_t j;
+                for (j = 0U; j < i; j++)
+                {
+                    (void)dev_eep_deinit((dev_eep_id_t)s_devices[j].eep_id);
+                }
+            }
             return result;
         }
     }
-
     /* Clear dirty maps and mirrors */
     for (i = 0U; i < SVC_EEP_CFG_MAX_DEVICES; i++)
     {
@@ -387,6 +395,14 @@ dev_err_t svc_eep_init(void)
             if (result != DEV_OK)
             {
                 s_initialized = false;
+                /* Clean up dev_eep devices before returning */
+                {
+                    uint8_t j;
+                    for (j = 0U; j < SVC_EEP_CFG_MAX_DEVICES; j++)
+                    {
+                        (void)dev_eep_deinit((dev_eep_id_t)s_devices[j].eep_id);
+                    }
+                }
                 return result;
             }
         }
@@ -422,6 +438,14 @@ dev_err_t svc_eep_init(void)
             if (mirror_magic != SVC_EEP_MAGIC_VALUE)
             {
                 s_initialized = false;
+                /* Clean up dev_eep devices before returning */
+                {
+                    uint8_t j;
+                    for (j = 0U; j < SVC_EEP_CFG_MAX_DEVICES; j++)
+                    {
+                        (void)dev_eep_deinit((dev_eep_id_t)s_devices[j].eep_id);
+                    }
+                }
                 return DEV_ERR_CRC;
             }
 
@@ -429,6 +453,14 @@ dev_err_t svc_eep_init(void)
             if (result != DEV_OK)
             {
                 s_initialized = false;
+                /* Clean up dev_eep devices before returning */
+                {
+                    uint8_t j;
+                    for (j = 0U; j < SVC_EEP_CFG_MAX_DEVICES; j++)
+                    {
+                        (void)dev_eep_deinit((dev_eep_id_t)s_devices[j].eep_id);
+                    }
+                }
                 return DEV_ERR_CRC;
             }
 #endif
