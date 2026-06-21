@@ -1,16 +1,25 @@
 #include "svc_eep_blocks.h"
 
-/* ── Block sizes ── */
+/* ── Block sizes (edit only these when adding/changing blocks) ── */
 
-#define SVC_EEP_BLOCK_SYSTEM_CFG_SIZE     (32U)
-#define SVC_EEP_BLOCK_USER_DATA_SIZE      (64U)
-#define SVC_EEP_BLOCK_DEVICE_INFO_SIZE    (16U)
+#define SVC_EEP_BLOCK_SYSTEM_CFG_SIZE     (1U)
+#define SVC_EEP_BLOCK_USER_DATA_SIZE      (1U)
+#define SVC_EEP_BLOCK_DEVICE_INFO_SIZE    (1U)
 
-/* ── EEPROM offsets ── */
+/*
+ * ── EEPROM offsets (auto-computed — do not edit manually) ──
+ *
+ * Each offset = previous offset + previous size.
+ * Only change SVC_EEP_BLOCK_BASE and the _SIZE macros above.
+ * The chain guarantees no gaps and no overlaps.
+ */
 #define SVC_EEP_BLOCK_BASE                (0x0000U)
-#define SVC_EEP_BLOCK_SYSTEM_CFG_OFFSET   (0x0000U)
-#define SVC_EEP_BLOCK_USER_DATA_OFFSET    (0x0020U)
-#define SVC_EEP_BLOCK_DEVICE_INFO_OFFSET  (0x0060U)
+#define SVC_EEP_BLOCK_SYSTEM_CFG_OFFSET   (SVC_EEP_BLOCK_BASE)
+#define SVC_EEP_BLOCK_USER_DATA_OFFSET    (SVC_EEP_BLOCK_SYSTEM_CFG_OFFSET + SVC_EEP_BLOCK_SYSTEM_CFG_SIZE)
+#define SVC_EEP_BLOCK_DEVICE_INFO_OFFSET  (SVC_EEP_BLOCK_USER_DATA_OFFSET  + SVC_EEP_BLOCK_USER_DATA_SIZE)
+
+/* Total used EEPROM size (auto-computed) */
+#define SVC_EEP_BLOCK_TOTAL_USED          (SVC_EEP_BLOCK_DEVICE_INFO_OFFSET + SVC_EEP_BLOCK_DEVICE_INFO_SIZE)
 
 /* ── Static RAM mirror buffers ── */
 

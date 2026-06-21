@@ -16,7 +16,7 @@ extern "C" {
 
 /* ── Timing ── */
 
-#define DEV_EEP_CFG_DEFAULT_WRITE_CYCLE_TIME_MS (5U)
+#define DEV_EEP_CFG_DEFAULT_WRITE_CYCLE_TIME_MS (100U)
 #define DEV_EEP_CFG_ACK_POLL_TIMEOUT_MS         (10U)
 #define DEV_EEP_CFG_ACK_POLL_INTERVAL_US        (100U)
 
