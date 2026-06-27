@@ -10,16 +10,11 @@ extern "C" {
 
 /* ── Feature toggles ── */
 
-#define SVC_EEP_CFG_RUNTIME_CHECK_ENABLED              DEV_ON
 #define SVC_EEP_CFG_AUTO_SYNC_ON_SHUTDOWN              DEV_ON
 
 /* ── Block limits ── */
 
 #define SVC_EEP_CFG_MAX_BLOCKS                         (16U)
-
-/* ── Mirror allocation mode ── */
-
-#define SVC_EEP_CFG_DYNAMIC_MIRROR_ENABLED             DEV_OFF
 
 /* ── Backward-compatible EEPROM dimension aliases ── */
 

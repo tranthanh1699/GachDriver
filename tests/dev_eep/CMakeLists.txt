@@ -21,6 +21,7 @@ add_executable(eep_test_host
 
 target_include_directories(eep_test_host PRIVATE
     ${PROJECT_ROOT}/services/svc_eep/include
+    ${PROJECT_ROOT}/services/svc_eep/src
     ${PROJECT_ROOT}/drivers/dev_i2c/port/mock
 )
 

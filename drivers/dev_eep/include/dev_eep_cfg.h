@@ -10,9 +10,7 @@ extern "C" {
 
 /* ── Feature toggles ── */
 
-#define DEV_EEP_CFG_RUNTIME_CHECK_ENABLED       DEV_ON
 #define DEV_EEP_CFG_ACK_POLLING_ENABLED         DEV_ON
-#define DEV_EEP_CFG_PAGE_WRITE_ENABLED          DEV_ON
 
 /* ── Timing ── */
 

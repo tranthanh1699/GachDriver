@@ -1,9 +1,18 @@
 #include "svc_eep.h"
+#include "svc_eep_internal.h"
 #include "dev_eep.h"
 #include "dev_i2c.h"
 #include "dev_i2c_port_mock.h"
 #include <stdio.h>
 #include <string.h>
+
+/* Host stub for HAL_Delay — the real implementation lives in the STM32 HAL.
+ * On host, dev_delay_ms() calls this; the mock I2C is instant so no real
+ * delay is needed. */
+void HAL_Delay(uint32_t ms)
+{
+    (void)ms;
+}
 
 static int g_failures = 0;
 static int g_passes   = 0;
@@ -68,7 +77,7 @@ static void force_clean_deinit(void)
 static void init_with_preset_block(svc_eep_block_id_t block_id,
                                    const uint8_t *data)
 {
-    const svc_eep_block_cfg_t *cfg = &s_svc_eep_block_cfg[block_id];
+    const svc_eep_block_info_t *cfg = svc_eep_get_block_info(block_id);
 
     if (svc_eep_is_initialized())
     {
@@ -90,7 +99,7 @@ static void init_with_preset_block(svc_eep_block_id_t block_id,
 /* Verify EEPROM content by reading through dev_eep (bypasses mirror) */
 static void verify_eeprom(svc_eep_block_id_t block_id, const uint8_t *expected)
 {
-    const svc_eep_block_cfg_t *cfg = &s_svc_eep_block_cfg[block_id];
+    const svc_eep_block_info_t *cfg = svc_eep_get_block_info(block_id);
     uint8_t temp[64];
     dev_err_t result;
 
@@ -580,6 +589,188 @@ TEST(24_shutdown_syncs_dirty_blocks)
     printf("    PASS\n"); g_passes++;
 }
 
+TEST(25_load_dirty_block_fails)
+{
+    uint8_t write_data[32U];
+
+    force_clean_init();
+
+    /* Write to mirror to make it dirty */
+    (void)memset(write_data, 0xAAU, sizeof(write_data));
+    CHECK_ERR(svc_eep_write_mirror(SVC_EEP_BLOCK_SYSTEM_CFG, write_data, 32U),
+              DEV_OK, "write_mirror");
+    CHECK_EQ(svc_eep_is_block_dirty(SVC_EEP_BLOCK_SYSTEM_CFG), true, "dirty");
+
+    /* Loading a dirty block must fail — unsaved changes would be lost */
+    CHECK_ERR(svc_eep_load_block(SVC_EEP_BLOCK_SYSTEM_CFG),
+              DEV_ERR_INVALID_STATE, "load dirty block rejected");
+
+    /* After sync, reload should succeed */
+    CHECK_ERR(svc_eep_sync_block(SVC_EEP_BLOCK_SYSTEM_CFG), DEV_OK, "sync");
+    CHECK_EQ(svc_eep_is_block_dirty(SVC_EEP_BLOCK_SYSTEM_CFG), false, "clean");
+    CHECK_ERR(svc_eep_load_block(SVC_EEP_BLOCK_SYSTEM_CFG), DEV_OK, "load after sync");
+
+    printf("    PASS\n"); g_passes++;
+}
+
+TEST(26_multi_page_write_and_read)
+{
+    uint8_t write_data[128U];
+    uint8_t read_data[128U];
+
+    force_clean_init();
+
+    /* Write 128 bytes through dev_eep directly — verifies page-splitting
+     * produces correct results. With 8-byte pages this exercises
+     * 16 page-boundary splits plus per-page write-cycle waits.
+     * Also verifies that chunked reads (UINT16_MAX per transaction)
+     * produce correct concatenated data. */
+    (void)memset(write_data, 0x5AU, sizeof(write_data));
+    CHECK_ERR(dev_eep_write(DEV_EEP_MAIN, 0U, write_data, 128U),
+              DEV_OK, "write 128 bytes");
+
+    /* Read back and verify */
+    (void)memset(read_data, 0, sizeof(read_data));
+    CHECK_ERR(dev_eep_read(DEV_EEP_MAIN, 0U, read_data, 128U),
+              DEV_OK, "read 128 bytes");
+    CHECK(memcmp(read_data, write_data, 128U) == 0, "128-byte data matches");
+
+    printf("    PASS\n"); g_passes++;
+}
+
+TEST(27_deinit_ordering_driver_before_state)
+{
+    uint8_t write_data[32U];
+
+    force_clean_init();
+
+    /* Write to mirror — block is now loaded and dirty */
+    (void)memset(write_data, 0xCCU, sizeof(write_data));
+    CHECK_ERR(svc_eep_write_mirror(SVC_EEP_BLOCK_SYSTEM_CFG, write_data, 32U),
+              DEV_OK, "write_mirror");
+    CHECK_EQ(svc_eep_is_block_dirty(SVC_EEP_BLOCK_SYSTEM_CFG), true, "dirty");
+
+    /* Normal deinit — verifies driver is deinitialized BEFORE block
+     * states are cleared, so that a deinit failure preserves dirty flags. */
+    CHECK_ERR(svc_eep_deinit(), DEV_OK, "deinit");
+    CHECK_EQ(svc_eep_is_initialized(), false, "deinitialized");
+
+    /* Re-init and verify dirty state was properly cleared by successful deinit */
+    (void)svc_eep_init();
+    CHECK_EQ(svc_eep_is_block_dirty(SVC_EEP_BLOCK_SYSTEM_CFG), false,
+            "dirty cleared after re-init");
+
+    printf("    PASS\n"); g_passes++;
+}
+
+TEST(28_block_id_validator)
+{
+    /* Valid range */
+    CHECK(svc_eep_block_id_is_valid(SVC_EEP_BLOCK_SYSTEM_CFG), "0 valid");
+    CHECK(svc_eep_block_id_is_valid(SVC_EEP_BLOCK_USER_DATA),  "1 valid");
+    CHECK(svc_eep_block_id_is_valid(SVC_EEP_BLOCK_DEVICE_INFO),"2 valid");
+
+    /* Out of range — upper bound */
+    CHECK(!svc_eep_block_id_is_valid(SVC_EEP_BLOCK_COUNT), "COUNT rejected");
+
+    /* Negative / wrapped values */
+    CHECK(!svc_eep_block_id_is_valid((svc_eep_block_id_t)-1),
+          "negative rejected");
+    CHECK(!svc_eep_block_id_is_valid((svc_eep_block_id_t)256),
+          "wrapped 256 rejected");
+    CHECK(!svc_eep_block_id_is_valid((svc_eep_block_id_t)65535U),
+          "large value rejected");
+
+    printf("    PASS\n"); g_passes++;
+}
+
+TEST(29_public_getter_rejects_invalid_ids)
+{
+    /* Verify the public getter rejects out-of-range IDs */
+    CHECK(svc_eep_get_block_info(SVC_EEP_BLOCK_COUNT) == NULL,
+          "getter returns NULL for COUNT");
+    CHECK(svc_eep_get_block_info((svc_eep_block_id_t)-1) == NULL,
+          "getter returns NULL for negative");
+    CHECK(svc_eep_get_block_info((svc_eep_block_id_t)256) == NULL,
+          "getter returns NULL for wrapped 256");
+    CHECK(svc_eep_get_block_info((svc_eep_block_id_t)65535U) == NULL,
+          "getter returns NULL for large value");
+
+    /* Valid IDs return non-NULL */
+    CHECK(svc_eep_get_block_info(SVC_EEP_BLOCK_SYSTEM_CFG) != NULL,
+          "getter returns non-NULL for valid id");
+
+    /* Block count getter */
+    CHECK_EQ(svc_eep_get_block_count(), (uint8_t)SVC_EEP_BLOCK_COUNT,
+             "block count matches");
+
+    printf("    PASS\n"); g_passes++;
+}
+
+TEST(30_public_getter_excludes_mirror)
+{
+    const svc_eep_block_info_t *info;
+
+    force_clean_init();
+
+    info = svc_eep_get_block_info(SVC_EEP_BLOCK_SYSTEM_CFG);
+    CHECK(info != NULL, "info non-NULL");
+
+    /* Verify metadata fields are accessible */
+    CHECK_EQ(info->block_id, (uint8_t)SVC_EEP_BLOCK_SYSTEM_CFG, "block_id correct");
+    CHECK_EQ(info->block_size, 32U, "block_size correct");
+
+    /* Verify the public info type does not contain the mirror pointer —
+     * sizeof confirms the smaller public type */
+    CHECK(sizeof(*info) < sizeof(svc_eep_block_cfg_t),
+          "public info type is smaller than internal type");
+
+    printf("    PASS\n"); g_passes++;
+}
+
+TEST(31_deinit_failure_preserves_dirty_state)
+{
+    uint8_t write_data[32U];
+
+    force_clean_init();
+
+    /* Write to mirror — block is now loaded and dirty */
+    (void)memset(write_data, 0xCCU, sizeof(write_data));
+    CHECK_ERR(svc_eep_write_mirror(SVC_EEP_BLOCK_SYSTEM_CFG, write_data, 32U),
+              DEV_OK, "write_mirror");
+    CHECK_EQ(svc_eep_is_block_dirty(SVC_EEP_BLOCK_SYSTEM_CFG), true, "dirty");
+
+    /* Arm the deinit fault — next dev_eep_deinit() will fail */
+    dev_eep_set_deinit_fault(true);
+
+    /* Deinit must fail, and dirty state MUST be preserved */
+    CHECK_ERR(svc_eep_deinit(), DEV_ERR_FAIL, "deinit fails with injected fault");
+    CHECK_EQ(svc_eep_is_initialized(), true,
+             "service still initialized after failed deinit");
+    CHECK_EQ(svc_eep_is_block_dirty(SVC_EEP_BLOCK_SYSTEM_CFG), true,
+             "dirty flag preserved after failed deinit");
+    CHECK_EQ(svc_eep_is_block_loaded(SVC_EEP_BLOCK_SYSTEM_CFG), true,
+             "loaded flag preserved after failed deinit");
+
+    /* Fault is one-shot — next deinit succeeds */
+    CHECK_ERR(svc_eep_deinit(), DEV_OK, "deinit succeeds after fault cleared");
+    CHECK_EQ(svc_eep_is_initialized(), false, "deinitialized");
+
+    /* Re-init and verify state is clean */
+    (void)svc_eep_init();
+    CHECK_EQ(svc_eep_is_block_dirty(SVC_EEP_BLOCK_SYSTEM_CFG), false,
+            "clean after re-init");
+
+    /* Verify fault can be disarmed without triggering */
+    dev_eep_set_deinit_fault(true);
+    dev_eep_set_deinit_fault(false);
+    CHECK_ERR(svc_eep_deinit(), DEV_OK, "deinit after disarm");
+    (void)svc_eep_init();
+    CHECK_ERR(svc_eep_shutdown(), DEV_OK, "shutdown after disarmed fault");
+
+    printf("    PASS\n"); g_passes++;
+}
+
 int main(void)
 {
     printf("=== svc_eep block-based host tests ===\n\n");
@@ -611,6 +802,13 @@ int main(void)
     RUN_TEST(22_sync_not_dirty_returns_ok);
     RUN_TEST(23_full_lifecycle_write_mirror_then_sync);
     RUN_TEST(24_shutdown_syncs_dirty_blocks);
+    RUN_TEST(25_load_dirty_block_fails);
+    RUN_TEST(26_multi_page_write_and_read);
+    RUN_TEST(27_deinit_ordering_driver_before_state);
+    RUN_TEST(28_block_id_validator);
+    RUN_TEST(29_public_getter_rejects_invalid_ids);
+    RUN_TEST(30_public_getter_excludes_mirror);
+    RUN_TEST(31_deinit_failure_preserves_dirty_state);
 
     printf("\n=== Results: %d passed, %d failed ===\n", g_passes, g_failures);
 

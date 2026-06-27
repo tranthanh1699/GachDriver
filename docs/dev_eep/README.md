@@ -41,6 +41,7 @@ target I2C port ← STM32 / ESP32 / nRF / mock
 | `dev_eep_write(eep_id, addr, data, len)` | Write raw bytes — page-splitting is automatic |
 | `dev_eep_is_ready(eep_id)` | Check if device ACKs on the I2C bus |
 | `dev_eep_get_info(eep_id, info)` | Query total size, page size, address width |
+| `dev_eep_set_deinit_fault(enable)` | Inject a one-shot deinit failure (test support) |
 
 ### 3.1 `dev_eep_init`
 
@@ -48,11 +49,13 @@ target I2C port ← STM32 / ESP32 / nRF / mock
 dev_err_t dev_eep_init(dev_eep_id_t eep_id);
 ```
 
+- **Validates the device configuration** before touching hardware: checks that `page_size` is non-zero, `mem_addr_size` is a valid enum value, `total_size` fits the configured address width (8-bit ≤ 256, 16-bit ≤ 65536, 24-bit ≤ 16777216), and `page_size` does not exceed the internal write buffer (`DEV_EEP_MAX_PAGE_SIZE`). Returns `DEV_ERR_CONFIG` on any violation.
 - Probes the device on the I2C bus by calling `dev_i2c_probe()`.
 - If the device ACKs, the driver marks it initialized and returns `DEV_OK`.
 - If the device does not respond, returns `DEV_ERR_TIMEOUT` (or `DEV_ERR_NO_ACK` from the port layer).
 - If already initialized, returns `DEV_ERR_ALREADY_INITIALIZED`.
 - If `eep_id` is not in the config table, returns `DEV_ERR_INVALID_ARG`.
+- **Uses table-indexed state** (`s_initialized[idx]`) so non-contiguous device IDs are safe — the config table index is determined by lookup, not by assuming the raw `eep_id` is a valid array index.
 
 **Must be called after `dev_i2c_init()`.** `dev_eep` does not initialize the I2C bus — that is the application's responsibility.
 
@@ -66,10 +69,12 @@ dev_err_t dev_eep_read(dev_eep_id_t eep_id,
 ```
 
 - Reads `length` bytes starting at `address` from the physical EEPROM.
-- **Reads are not page-constrained.** The entire requested range is read in a single I2C transaction.
+- **Automatically splits reads into I2C-sized chunks** (UINT16_MAX per transaction) so the full uint32_t API range is usable regardless of the underlying I2C layer's uint16_t limit.
 - For 8-bit and 16-bit address widths, uses `dev_i2c_mem_read()` (efficient combined "write address + read data" transaction).
 - For 24-bit and 32-bit address widths, uses `dev_i2c_write_read()` (manually constructs the address bytes).
 - Returns `DEV_ERR_OUT_OF_RANGE` if `address + length` exceeds the device size.
+- Returns `DEV_ERR_INVALID_ARG` if `eep_id` is invalid or `length` is zero.
+- Returns `DEV_ERR_NULL_PTR` if `data` is NULL.
 
 ### 3.3 `dev_eep_write`
 
@@ -81,13 +86,14 @@ dev_err_t dev_eep_write(dev_eep_id_t eep_id,
 ```
 
 - Writes `length` bytes starting at `address` to the physical EEPROM.
-- **Automatically splits the write at page boundaries.** The caller does NOT need to align data or worry about page size.
+- **Automatically splits the write at page boundaries.** The caller does NOT need to align data or worry about page size. No artificial ceiling on write length — each page chunk is bounded by the configured `page_size`, which is validated at init to fit the I2C layer.
 - For each page chunk:
   1. Sends the data via `dev_i2c_mem_write()` (or `dev_i2c_write()` for 24/32-bit addressing).
   2. Waits for the EEPROM write cycle to complete (ACK polling or fixed delay).
   3. Advances to the next chunk.
 - If any page write or wait fails, returns immediately with the error. Already-written pages are NOT rolled back.
 - Returns `DEV_ERR_OUT_OF_RANGE` if `address + length` exceeds the device size.
+- Returns `DEV_ERR_CONFIG` if `page_size` is zero (caught at init).
 
 ### 3.4 `dev_eep_is_ready`
 
@@ -180,21 +186,11 @@ All device-level configuration lives in `drivers/dev_eep/include/dev_eep_cfg.h`.
 ### 5.1 Feature Toggles
 
 ```c
-#define DEV_EEP_CFG_RUNTIME_CHECK_ENABLED  DEV_ON
-```
-When `DEV_ON`: all public API functions validate parameters (null pointers, range checks, init state). When `DEV_OFF`: parameter checks are skipped for speed. **Keep ON except in extreme flash/RAM-constrained situations.**
-
-```c
 #define DEV_EEP_CFG_ACK_POLLING_ENABLED    DEV_ON
 ```
-When `DEV_ON`: after each page write, the driver actively polls the EEPROM via `dev_i2c_probe()` until the device ACKs (meaning its internal write cycle is done). This is more precise than a fixed delay — you wait exactly as long as the chip needs.
+When `DEV_ON`: after each page write, the driver actively polls the EEPROM via `dev_i2c_probe()` until the device ACKs (meaning its internal write cycle is done). This is more precise than a fixed delay — you wait exactly as long as the chip needs. Bus errors and unexpected failures propagate immediately; only NACK / timeout (device still busy) causes the driver to keep polling.
 
 When `DEV_OFF`: the driver uses a fixed delay (`write_cycle_time_ms`, typically 5ms) after each page write. This is simpler but can be either too short (data corruption) or too long (wasted time).
-
-```c
-#define DEV_EEP_CFG_PAGE_WRITE_ENABLED     DEV_ON
-```
-When `DEV_ON`: `dev_eep_write()` splits data at page boundaries and writes one page at a time. **Keep ON.** When `DEV_OFF`: writes are not split (useful only for single-page writes or debugging).
 
 ### 5.2 Timing
 
@@ -211,7 +207,7 @@ Maximum time the driver will poll for an ACK before giving up. After each page w
 ```c
 #define DEV_EEP_CFG_ACK_POLL_INTERVAL_US         (100U)
 ```
-Delay between ACK polling attempts, in microseconds. Currently not used in the implementation (the driver polls with 1ms intervals via `dev_delay_ms(1)`). Reserved for future finer-grained polling.
+Delay between ACK polling attempts, in microseconds. Converted to whole milliseconds at compile time (minimum 1 ms) and used as the actual polling interval via `dev_delay_ms()`.
 
 ### 5.3 Device Count
 
@@ -292,13 +288,14 @@ dev_i2c_probe(device_addr)
    │
    ├── DEV_OK ──→ Device ACKed → write cycle complete → proceed
    │
-   └── error ──→ dev_delay_ms(1) → increment elapsed → probe again
-                    │
-                    ├── elapsed < timeout → loop
-                    └── elapsed ≥ timeout → DEV_ERR_TIMEOUT
+   ├── DEV_ERR_TIMEOUT or DEV_ERR_NO_ACK ──→ still busy → delay → probe again
+   │
+   └── any other error ──→ bus failure → propagate immediately
 ```
 
-The EEPROM ignores all I2C traffic while its internal write is in progress — it won't ACK its address. As soon as it ACKs, the write is done. No guesswork, no wasted time.
+The polling interval is `DEV_EEP_CFG_ACK_POLL_INTERVAL_US` (converted to ms, min 1 ms).
+Elapsed time is counted in delay increments — approximate but safe given the generous timeout.
+Bus errors (DEV_ERR_BUS, etc.) are not retried; they propagate to the caller immediately.
 
 ### Fixed Delay (fallback, `DEV_EEP_CFG_ACK_POLLING_ENABLED == DEV_OFF`)
 
@@ -314,9 +311,32 @@ proceed
 
 Simpler but risky — if your delay is shorter than the actual write time, the next write corrupts data.
 
-## 8. Usage Examples
+## 8. Internal Buffer Sizing
 
-### 8.1 Minimal Bare-Metal Read/Write (without svc_eep)
+The driver uses a stack buffer for 24-bit and 32-bit addressed writes:
+
+```c
+#define DEV_EEP_MAX_PAGE_SIZE   DEV_EEP_MAIN_PAGE_SIZE
+#define DEV_EEP_MAX_ADDR_BYTES  (4U)
+#define DEV_EEP_MAX_BUF_SIZE    (DEV_EEP_MAX_PAGE_SIZE + DEV_EEP_MAX_ADDR_BYTES)
+```
+
+`DEV_EEP_MAX_PAGE_SIZE` must be the largest page size across **all** configured devices. When adding a device with a larger page, update the macro (a documented comment in the source shows the pattern). A compile-time validation ensures each device's `page_size ≤ DEV_EEP_MAX_PAGE_SIZE`.
+
+## 9. Fault Injection (Test Support)
+
+```c
+void dev_eep_set_deinit_fault(bool enable);
+```
+
+A one-shot fault injector for testing deinitialization error paths:
+- When armed (`enable = true`), the **next** call to `dev_eep_deinit()` returns `DEV_ERR_FAIL` without touching device state.
+- The fault auto-clears after one use. Call with `enable = false` to disarm without triggering.
+- Production builds can leave this in place — it has zero overhead when not called (a single static `bool`).
+
+## 10. Usage Examples
+
+### 10.1 Minimal Bare-Metal Read/Write (without svc_eep)
 
 ```c
 #include "dev_i2c.h"
@@ -382,7 +402,7 @@ int main(void)
 }
 ```
 
-### 8.2 Checking Device Readiness
+### 10.2 Checking Device Readiness
 
 ```c
 dev_err_t err = dev_eep_is_ready(DEV_EEP_MAIN);
@@ -395,7 +415,7 @@ if (err == DEV_OK) {
 }
 ```
 
-### 8.3 Querying Device Info at Runtime
+### 10.3 Querying Device Info at Runtime
 
 ```c
 dev_eep_info_t info;
@@ -408,7 +428,7 @@ if (err == DEV_OK) {
 }
 ```
 
-### 8.4 Writing Across Page Boundaries (Automatic)
+### 10.4 Writing Across Page Boundaries (Automatic)
 
 ```c
 /* Write 20 bytes starting at address 5 on an 8-byte-page EEPROM.
@@ -423,7 +443,7 @@ memset(data, 0x42, sizeof(data));
 dev_err_t err = dev_eep_write(DEV_EEP_MAIN, 5U, data, 20U);
 ```
 
-### 8.5 Error Handling for Every API
+### 10.5 Error Handling for Every API
 
 ```c
 dev_err_t err;
@@ -458,7 +478,7 @@ default:
 }
 ```
 
-## 9. Adding a Second EEPROM Device
+## 11. Adding a Second EEPROM Device
 
 ### Step 1 — Add a device ID in `dev_eep_cfg.h`
 
@@ -512,7 +532,7 @@ dev_eep_init(DEV_EEP_AUX);
 dev_eep_write(DEV_EEP_AUX, 0U, my_data, my_len);
 ```
 
-## 10. Dependency Rules
+## 12. Dependency Rules
 
 | Allowed | Forbidden |
 |---------|-----------|
@@ -521,14 +541,14 @@ dev_eep_write(DEV_EEP_AUX, 0U, my_data, my_len);
 | `<string.h>` — `memcpy` only | Any RTOS API |
 | | Application code |
 
-## 11. Safety Notes
+## 13. Safety Notes
 
 - **Not reentrant.** A per-device init flag is tracked, but concurrent I2C access is not mutex-protected. Use external locking if calling from multiple RTOS tasks.
 - **`dev_delay_ms()` must be real.** The weak default is a no-op. Without a real delay, ACK polling loops spin at CPU speed and fixed-delay fallback never waits — causing data corruption.
 - **Page size is critical.** If `DEV_EEP_MAIN_PAGE_SIZE` doesn't match the actual chip, writes that cross the real page boundary will wrap around and corrupt data silently. Always verify against the datasheet.
 - **No rollback on partial write.** If a multi-page `dev_eep_write()` fails on page 3 of 5, pages 1–2 are already written. The caller must handle this (re-read and verify, or use `svc_eep` which provides CRC protection).
 
-## 12. Porting to New Hardware
+## 14. Porting to New Hardware
 
 `dev_eep` has no port layer. All hardware-specific work is in `dev_i2c`. To bring up `dev_eep` on a new MCU:
 
@@ -539,7 +559,7 @@ dev_eep_write(DEV_EEP_AUX, 0U, my_data, my_len);
 5. Provide a real `dev_delay_ms()` implementation.
 6. Build, flash, and call `dev_eep_init(DEV_EEP_MAIN)`. If it returns `DEV_OK`, the EEPROM is alive.
 
-## 13. Source Files
+## 15. Source Files
 
 | File | Purpose |
 |------|---------|

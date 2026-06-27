@@ -18,9 +18,13 @@ includes vendor headers.**
 | Per-block RAM mirror | Each block has its own mirror — no full-EEPROM copy |
 | Lazy loading | Blocks are loaded from EEPROM only when accessed |
 | Per-block dirty tracking | Each block tracks whether its mirror differs from EEPROM |
+| Dirty-load protection | Loading a dirty block from EEPROM is rejected — prevents silent data loss |
 | Direct write | Write immediately to EEPROM via `svc_eep_write_direct()` |
 | Mirror write | Write to RAM only via `svc_eep_write_mirror()` — sync later |
 | Selective sync | Sync only dirty blocks to EEPROM via `svc_eep_sync_block()` or `svc_eep_sync_all()` |
+| Private mirrors | Mirror buffers and config table are private — external code accesses them only through service APIs |
+| Robust ID validation | `svc_eep_block_id_is_valid()` handles negative and wrapped IDs |
+| Concurrency model | Documented single-context only |
 
 ---
 
@@ -99,7 +103,7 @@ svc_eep_read_block(0, data, 32);
 
 ### Block Configuration
 
-Each block has a static configuration descriptor:
+The public API exposes only metadata through `svc_eep_block_info_t`:
 
 ```c
 typedef struct
@@ -107,24 +111,34 @@ typedef struct
     uint8_t        block_id;
     uint32_t       eep_offset;
     uint16_t       block_size;
-    uint8_t       *mirror;
-} svc_eep_block_cfg_t;
+} svc_eep_block_info_t;
 ```
 
-The config table is indexed by block ID and lives in `svc_eep_blocks.c`.
-
-### Block Runtime State
-
-Each block has runtime state tracking:
+The internal configuration type (in `svc_eep_internal.h`, **not** part of the public API) embeds this as a named sub-object to avoid strict-aliasing violations:
 
 ```c
 typedef struct
 {
-    bool loaded;   /* mirror contains valid data from EEPROM */
-    bool dirty;    /* mirror differs from EEPROM */
-    bool valid;    /* mirror data is usable */
+    svc_eep_block_info_t info;     /* public metadata */
+    uint8_t              *mirror;  /* private — only accessible internally */
+} svc_eep_block_cfg_t;
+```
+
+External code obtains block metadata via `svc_eep_get_block_info(block_id)` which returns `const svc_eep_block_info_t *`. The mirror pointer is never exposed publicly. The config table and mirror buffers are `static` inside `svc_eep_blocks.c`.
+
+### Block Runtime State
+
+Each block has runtime state tracking (`svc_eep_block_state_t` in `svc_eep_internal.h`):
+
+```c
+typedef struct
+{
+    bool loaded;   /* mirror contains data (from EEPROM or from a write) */
+    bool dirty;    /* mirror differs from EEPROM — needs sync */
 } svc_eep_block_state_t;
 ```
+
+The `valid` flag previously tracked in this struct has been removed — it was written but never read.
 
 ### EEPROM Layout
 
@@ -159,11 +173,9 @@ dev_err_t svc_eep_shutdown(void);
 bool      svc_eep_is_initialized(void);
 ```
 
-- `svc_eep_init()` — validates block config, inits `dev_eep`, initializes all block
-  states to not-loaded/not-dirty/not-valid. Does **not** read any EEPROM data.
-- `svc_eep_deinit()` — clears block states, deinits `dev_eep`. Does **not** write EEPROM.
-- `svc_eep_shutdown()` — syncs all dirty blocks (if `SVC_EEP_CFG_AUTO_SYNC_ON_SHUTDOWN`
-  is `DEV_ON`), then deinits `dev_eep`.
+- `svc_eep_init()` — validates block config (non-zero size, non-NULL mirrors, non-overlapping EEPROM ranges, total range within device capacity), inits `dev_eep`, initializes all block states to not-loaded/not-dirty. Does **not** read any EEPROM data.
+- `svc_eep_deinit()` — deinitializes `dev_eep` **first**, then clears block states only on success. If `dev_eep_deinit()` fails, service state (including dirty flags) is preserved so the caller can retry.
+- `svc_eep_shutdown()` — syncs all dirty blocks (if `SVC_EEP_CFG_AUTO_SYNC_ON_SHUTDOWN` is `DEV_ON`), then deinits `dev_eep`. Deinit failure preserves service state.
 
 ### Block Load
 
@@ -172,7 +184,10 @@ dev_err_t svc_eep_load_block(svc_eep_block_id_t block_id);
 ```
 
 Reads a single block from EEPROM into its mirror via `dev_eep_read()`.
-Does not read other blocks. Sets `loaded = true`, `valid = true`, `dirty = false`.
+Does not read other blocks. Sets `loaded = true`, `dirty = false`.
+**Rejects loading if the block is dirty** (returns `DEV_ERR_INVALID_STATE`) —
+this prevents silently overwriting unsaved mirror changes. Call `svc_eep_sync_block()`
+first to persist, or accept the data loss and deinit/re-init.
 
 ### Block Read
 
@@ -229,6 +244,18 @@ dev_err_t svc_eep_sync_all(void);
 - `svc_eep_sync_all()` — iterates all blocks, syncs only dirty ones. Continues on
   individual block failures (returns first error).
 
+### Block Metadata Access
+
+```c
+const svc_eep_block_info_t *svc_eep_get_block_info(svc_eep_block_id_t block_id);
+bool svc_eep_block_id_is_valid(svc_eep_block_id_t block_id);
+uint8_t svc_eep_get_block_count(void);
+```
+
+- `svc_eep_get_block_info()` — returns a pointer to a block's public metadata (block_id, eep_offset, block_size). The returned pointer is valid for the lifetime of the application. Returns NULL for invalid IDs. The mirror pointer is NOT exposed — use `svc_eep_get_mirror_ptr()` or `svc_eep_read_block()` for data access.
+- `svc_eep_block_id_is_valid()` — validates a block ID against the configured range. Handles negative values and wrapped IDs correctly regardless of the compiler's enum signedness.
+- `svc_eep_get_block_count()` — returns `SVC_EEP_BLOCK_COUNT`.
+
 ### State Queries
 
 ```c
@@ -236,6 +263,8 @@ bool svc_eep_is_block_loaded(svc_eep_block_id_t block_id);
 bool svc_eep_is_block_dirty(svc_eep_block_id_t block_id);
 bool svc_eep_is_dirty(void);
 ```
+
+All state queries use `svc_eep_block_id_is_valid()` internally — out-of-range IDs (including negative and wrapped values) return `false` without accessing out-of-bounds memory.
 
 ---
 
@@ -278,14 +307,13 @@ All configuration lives in `svc_eep_cfg.h`.
 | Macro | Default | Purpose |
 |-------|---------|---------|
 | `SVC_EEP_CFG_MAX_BLOCKS` | `16` | Maximum supported block count |
-| `SVC_EEP_CFG_DYNAMIC_MIRROR_ENABLED` | `DEV_OFF` | Enable dynamic mirror allocation |
 | `SVC_EEP_CFG_AUTO_SYNC_ON_SHUTDOWN` | `DEV_ON` | Sync dirty blocks during shutdown |
-| `SVC_EEP_CFG_RUNTIME_CHECK_ENABLED` | `DEV_ON` | Enable parameter validation |
 
 ### Block Count Validation
 
 `SVC_EEP_BLOCK_COUNT` must not exceed `SVC_EEP_CFG_MAX_BLOCKS`.
-A compile-time `#error` enforces this.
+A `_Static_assert` (C) / `static_assert` (C++) in `svc_eep_blocks.h` enforces this
+at compile time. Unlike a preprocessor `#if`, this correctly evaluates the enum constant.
 
 ---
 
@@ -306,38 +334,36 @@ typedef enum
 } svc_eep_block_id_t;
 ```
 
-2. Define the block size and EEPROM offset in `svc_eep_blocks.c`:
+2. Define the block size in `svc_eep_blocks.c` (offset is auto-computed):
 
 ```c
 #define SVC_EEP_BLOCK_NEW_BLOCK_SIZE    (48U)
-#define SVC_EEP_BLOCK_NEW_BLOCK_OFFSET  (0x0070U)
 ```
 
-3. Declare a static mirror buffer in `svc_eep_blocks.c`:
+3. Add a **static** mirror buffer in `svc_eep_blocks.c`:
 
 ```c
-uint8_t s_new_block_mirror[SVC_EEP_BLOCK_NEW_BLOCK_SIZE];
+static uint8_t s_new_block_mirror[SVC_EEP_BLOCK_NEW_BLOCK_SIZE];
 ```
 
-4. Add the mirror extern declaration in `svc_eep_blocks.h`:
-
-```c
-extern uint8_t s_new_block_mirror[];
-```
-
-5. Add a config table entry in `svc_eep_blocks.c`:
+4. Add a config table entry with the embedded `.info` sub-object:
 
 ```c
 [SVC_EEP_BLOCK_NEW_BLOCK] =
 {
-    .block_id   = (uint8_t)SVC_EEP_BLOCK_NEW_BLOCK,
-    .eep_offset = SVC_EEP_BLOCK_NEW_BLOCK_OFFSET,
-    .block_size = SVC_EEP_BLOCK_NEW_BLOCK_SIZE,
-    .mirror     = s_new_block_mirror
+    .info =
+    {
+        .block_id   = (uint8_t)SVC_EEP_BLOCK_NEW_BLOCK,
+        .eep_offset = SVC_EEP_BLOCK_NEW_BLOCK_OFFSET,  /* auto-computed */
+        .block_size = SVC_EEP_BLOCK_NEW_BLOCK_SIZE,
+    },
+    .mirror = s_new_block_mirror
 },
 ```
 
-6. Rebuild and verify the block doesn't overlap with existing blocks.
+**Do NOT** add `extern` declarations in any header — mirrors and the config table are private to `svc_eep_blocks.c`. External code accesses block metadata only through `svc_eep_get_block_info()`.
+
+5. Rebuild. The `_Static_assert` in `svc_eep_blocks.h` verifies the new `SVC_EEP_BLOCK_COUNT` is within `SVC_EEP_CFG_MAX_BLOCKS`. The init-time validator checks for overlaps and EEPROM bounds.
 
 ---
 
@@ -356,13 +382,18 @@ extern uint8_t s_new_block_mirror[];
 
 ## 9. Safety Notes
 
-- Block IDs are validated against `SVC_EEP_BLOCK_COUNT` before any array access.
-- All pointer arguments are validated for NULL.
-- Length must match configured block size — partial access is rejected.
-- Block EEPROM ranges are validated for overlap during `svc_eep_init()`.
-- `svc_eep_mark_dirty()` requires the block to be loaded first.
-- No dynamic allocation in default configuration (`SVC_EEP_CFG_DYNAMIC_MIRROR_ENABLED = DEV_OFF`).
-- Invalid block ID returns `DEV_ERR_INVALID_ARG` without accessing the config table out of bounds.
+- **Block ID validation** uses `svc_eep_block_id_is_valid()` which correctly handles negative and wrapped values regardless of the compiler's enum signedness. Out-of-range IDs are rejected before any array access.
+- **All pointer arguments** are validated for NULL before use.
+- **Length must match** configured block size — partial access is rejected.
+- **Block overlap detection** validates all EEPROM ranges are disjoint and within device bounds during `svc_eep_init()`.
+- **Dirty-load protection**: `svc_eep_load_block()` rejects loading a dirty block (returns `DEV_ERR_INVALID_STATE`) — prevents silently overwriting unsaved mirror changes.
+- **Deinit ordering**: `dev_eep_deinit()` is called **before** clearing block states. If the driver fails to deinit, dirty flags and loaded state are preserved so the caller can retry.
+- **Mirrors are private**: mirror buffers and the config table are `static` inside `svc_eep_blocks.c`. External code accesses metadata only through `svc_eep_get_block_info()` which returns a mirror-free descriptor. The internal type (`svc_eep_block_cfg_t`) lives in `svc_eep_internal.h` (not on the public include path).
+- **Strict-aliasing compliant**: `svc_eep_block_cfg_t` embeds `svc_eep_block_info_t info` as a **named member** — the public getter returns `&cfg->info`, a valid pointer to a real `svc_eep_block_info_t` object.
+- **No dynamic allocation** — all mirrors are statically allocated at compile time.
+- **Single-context only** — the service is NOT concurrency-safe. Do not call from multiple threads, tasks, or ISR contexts without external synchronization.
+- **`svc_eep_mark_dirty()`** requires the block to be loaded first.
+- **Fault injection support** — `dev_eep_set_deinit_fault(true)` enables testing deinit failure paths without hardware modification.
 
 ---
 

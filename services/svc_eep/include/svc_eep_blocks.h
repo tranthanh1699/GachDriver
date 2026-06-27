@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 #include "svc_eep_types.h"
+#include "svc_eep_cfg.h"
 
 /* ── Block ID enum ──
  *
@@ -29,19 +30,49 @@ typedef enum
 
 /* ── Compile-time block count validation ── */
 
-#if (SVC_EEP_BLOCK_COUNT > SVC_EEP_CFG_MAX_BLOCKS)
-#error "SVC_EEP_BLOCK_COUNT exceeds SVC_EEP_CFG_MAX_BLOCKS"
+#ifdef __cplusplus
+static_assert((SVC_EEP_BLOCK_COUNT <= SVC_EEP_CFG_MAX_BLOCKS),
+              "SVC_EEP_BLOCK_COUNT exceeds SVC_EEP_CFG_MAX_BLOCKS");
+#else
+_Static_assert((SVC_EEP_BLOCK_COUNT <= SVC_EEP_CFG_MAX_BLOCKS),
+               "SVC_EEP_BLOCK_COUNT exceeds SVC_EEP_CFG_MAX_BLOCKS");
 #endif
 
-/* ── Extern mirror declarations ── */
+/* ── Block config accessors (implemented in svc_eep_blocks.c) ──
+ *
+ * Mirror buffers and the config table are private to svc_eep_blocks.c.
+ * External code MUST access block configuration only through these
+ * accessors and the svc_eep_* service APIs.
+ */
 
-extern uint8_t s_system_cfg_mirror[];
-extern uint8_t s_user_data_mirror[];
-extern uint8_t s_device_info_mirror[];
+/**
+ * @brief Get a const pointer to a block's public metadata.
+ *
+ * Returns a mirror-free descriptor suitable for external consumption.
+ * The returned pointer is valid for the lifetime of the application.
+ *
+ * @param block_id Block identifier.
+ * @return Pointer to block info, or NULL if block_id is out of range.
+ */
+const svc_eep_block_info_t *svc_eep_get_block_info(svc_eep_block_id_t block_id);
 
-/* ── Block config table (defined in svc_eep_blocks.c) ── */
+/**
+ * @brief Validate a block ID against the configured range.
+ *
+ * Handles negative and wrapped values correctly regardless of the
+ * compiler's choice of signedness for the enum type.
+ *
+ * @param block_id Block identifier to validate.
+ * @return true if the ID is valid (0 .. SVC_EEP_BLOCK_COUNT-1).
+ */
+bool svc_eep_block_id_is_valid(svc_eep_block_id_t block_id);
 
-extern const svc_eep_block_cfg_t s_svc_eep_block_cfg[SVC_EEP_BLOCK_COUNT];
+/**
+ * @brief Get the number of configured blocks.
+ *
+ * @return SVC_EEP_BLOCK_COUNT.
+ */
+uint8_t svc_eep_get_block_count(void);
 
 #ifdef __cplusplus
 }

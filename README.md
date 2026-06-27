@@ -109,7 +109,7 @@ app/             Product/application logic
 
 tests/
   dev_shell/     35 host tests
-  dev_eep/       24 host tests
+  dev_eep/       31 host tests
   dev_gpio/      34 host tests
   dev_i2c/       24 host tests
   dev_crc/       13 host tests

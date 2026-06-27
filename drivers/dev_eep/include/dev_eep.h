@@ -50,9 +50,9 @@ dev_err_t dev_eep_deinit(dev_eep_id_t eep_id);
  * @param length    Number of bytes to read.
  *
  * @return DEV_OK if successful.
- * @return DEV_ERR_INVALID_ARG if eep_id, address, or length is invalid.
+ * @return DEV_ERR_INVALID_ARG if eep_id is invalid or length is zero.
  * @return DEV_ERR_NULL_PTR if data is NULL.
- * @return DEV_ERR_OUT_OF_RANGE if address + length exceeds device size.
+ * @return DEV_ERR_OUT_OF_RANGE if address or address+length exceeds device size.
  * @return DEV_ERR_NOT_INITIALIZED if not initialized.
  */
 dev_err_t dev_eep_read(dev_eep_id_t eep_id,
@@ -73,9 +73,10 @@ dev_err_t dev_eep_read(dev_eep_id_t eep_id,
  * @param length    Number of bytes to write.
  *
  * @return DEV_OK if successful.
- * @return DEV_ERR_INVALID_ARG if eep_id, address, or length is invalid.
+ * @return DEV_ERR_INVALID_ARG if eep_id is invalid or length is zero.
  * @return DEV_ERR_NULL_PTR if data is NULL.
- * @return DEV_ERR_OUT_OF_RANGE if address + length exceeds device size.
+ * @return DEV_ERR_OUT_OF_RANGE if address or address+length exceeds device size.
+ * @return DEV_ERR_CONFIG if page_size is zero.
  * @return DEV_ERR_NOT_INITIALIZED if not initialized.
  * @return DEV_ERR_TIMEOUT if ACK polling times out during write cycle.
  */
@@ -110,6 +111,18 @@ dev_err_t dev_eep_is_ready(dev_eep_id_t eep_id);
  */
 dev_err_t dev_eep_get_info(dev_eep_id_t eep_id,
                            dev_eep_info_t *info);
+
+/**
+ * @brief Inject a fault that makes the next dev_eep_deinit() fail.
+ *
+ * Intended for testing deinitialization error paths.  When enabled,
+ * the next call to dev_eep_deinit() returns DEV_ERR_FAIL regardless
+ * of the actual device state.  The fault is automatically cleared
+ * after one use so that subsequent calls behave normally.
+ *
+ * @param enable true to arm the fault, false to disarm without triggering.
+ */
+void dev_eep_set_deinit_fault(bool enable);
 
 #ifdef __cplusplus
 }

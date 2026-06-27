@@ -7,24 +7,18 @@ extern "C" {
 
 #include "dev_types.h"
 
-/* ── Block configuration descriptor (static, read-only) ── */
+/* ── Public block metadata (no mirror pointer) ──
+ *
+ * Returned by svc_eep_get_block_info(). Safe for external consumption;
+ * does not expose the mutable mirror pointer.
+ */
 
 typedef struct
 {
     uint8_t        block_id;
     uint32_t       eep_offset;
     uint16_t       block_size;
-    uint8_t       *mirror;
-} svc_eep_block_cfg_t;
-
-/* ── Block runtime state (mutable) ── */
-
-typedef struct
-{
-    bool loaded;
-    bool dirty;
-    bool valid;
-} svc_eep_block_state_t;
+} svc_eep_block_info_t;
 
 #ifdef __cplusplus
 }

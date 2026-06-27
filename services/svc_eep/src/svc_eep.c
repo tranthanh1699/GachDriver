@@ -1,33 +1,23 @@
 #include "svc_eep.h"
+#include "svc_eep_internal.h"
 #include "dev_eep.h"
 #include "dev_assert.h"
 #include <string.h>
 
-/* ── Internal state ── */
+/* ── Internal state ──
+ *
+ * WARNING: This service is NOT concurrency-safe. All APIs are single-context
+ * only. Do not call from multiple threads, tasks, or ISR contexts without
+ * external synchronization. Mirrors, flags, and lifecycle state are
+ * unprotected against concurrent access.
+ */
 
 static svc_eep_block_state_t s_svc_eep_block_state[SVC_EEP_BLOCK_COUNT];
 static bool s_initialized = false;
 
 /* ── Internal helpers: forward declarations ── */
 
-static const svc_eep_block_cfg_t *svc_eep_find_block_cfg(svc_eep_block_id_t block_id);
 static dev_err_t svc_eep_validate_config_table(void);
-
-/* ── Internal helper implementations ── */
-
-static const svc_eep_block_cfg_t *svc_eep_find_block_cfg(svc_eep_block_id_t block_id)
-{
-    uint8_t i;
-
-    for (i = 0U; i < SVC_EEP_BLOCK_COUNT; i++)
-    {
-        if (s_svc_eep_block_cfg[i].block_id == (uint8_t)block_id)
-        {
-            return &s_svc_eep_block_cfg[i];
-        }
-    }
-    return NULL;
-}
 
 static dev_err_t svc_eep_validate_config_table(void)
 {
@@ -35,8 +25,11 @@ static dev_err_t svc_eep_validate_config_table(void)
     dev_err_t result;
     uint8_t i;
     uint8_t j;
+    uint8_t block_count;
     uint32_t block_end;
     uint32_t other_end;
+
+    block_count = svc_eep_get_block_count();
 
     /* Get total EEPROM size from dev_eep for bounds checking */
     result = dev_eep_get_info(DEV_EEP_MAIN, &eep_info);
@@ -45,50 +38,55 @@ static dev_err_t svc_eep_validate_config_table(void)
         return result;
     }
 
-    for (i = 0U; i < SVC_EEP_BLOCK_COUNT; i++)
+    for (i = 0U; i < block_count; i++)
     {
-        const svc_eep_block_cfg_t *cfg = &s_svc_eep_block_cfg[i];
+        const svc_eep_block_cfg_t *cfg = svc_eep_get_block_cfg((svc_eep_block_id_t)i);
+
+        /* cfg must be non-NULL for valid in-range block IDs */
+        if (cfg == NULL)
+        {
+            return DEV_ERR_CONFIG;
+        }
 
         /* Block ID must match its array index */
-        if (cfg->block_id != i)
+        if (cfg->info.block_id != i)
         {
             return DEV_ERR_CONFIG;
         }
 
         /* Block size must be non-zero */
-        if (cfg->block_size == 0U)
+        if (cfg->info.block_size == 0U)
         {
             return DEV_ERR_CONFIG;
         }
 
-        /* Mirror pointer must be valid (static allocation) */
-#if (SVC_EEP_CFG_DYNAMIC_MIRROR_ENABLED == DEV_OFF)
+        /* Mirror pointer must be valid — mirrors are statically allocated
+         * in svc_eep_blocks.c and must never be NULL */
         if (cfg->mirror == NULL)
         {
             return DEV_ERR_CONFIG;
         }
-#endif
 
         /* EEPROM offset + size must not exceed total EEPROM size */
-        block_end = cfg->eep_offset + (uint32_t)cfg->block_size;
-        if ((block_end < cfg->eep_offset) || (block_end > eep_info.total_size))
+        block_end = cfg->info.eep_offset + (uint32_t)cfg->info.block_size;
+        if ((block_end < cfg->info.eep_offset) || (block_end > eep_info.total_size))
         {
             return DEV_ERR_CONFIG;
         }
     }
 
     /* Check for overlapping blocks */
-    for (i = 0U; i < SVC_EEP_BLOCK_COUNT; i++)
+    for (i = 0U; i < block_count; i++)
     {
-        const svc_eep_block_cfg_t *cfg = &s_svc_eep_block_cfg[i];
-        block_end = cfg->eep_offset + (uint32_t)cfg->block_size;
+        const svc_eep_block_cfg_t *cfg = svc_eep_get_block_cfg((svc_eep_block_id_t)i);
+        block_end = cfg->info.eep_offset + (uint32_t)cfg->info.block_size;
 
-        for (j = (uint8_t)(i + 1U); j < SVC_EEP_BLOCK_COUNT; j++)
+        for (j = (uint8_t)(i + 1U); j < block_count; j++)
         {
-            const svc_eep_block_cfg_t *other = &s_svc_eep_block_cfg[j];
-            other_end = other->eep_offset + (uint32_t)other->block_size;
+            const svc_eep_block_cfg_t *other = svc_eep_get_block_cfg((svc_eep_block_id_t)j);
+            other_end = other->info.eep_offset + (uint32_t)other->info.block_size;
 
-            if (!((block_end <= other->eep_offset) || (other_end <= cfg->eep_offset)))
+            if (!((block_end <= other->info.eep_offset) || (other_end <= cfg->info.eep_offset)))
             {
                 return DEV_ERR_CONFIG;
             }
@@ -129,7 +127,6 @@ dev_err_t svc_eep_init(void)
     {
         s_svc_eep_block_state[i].loaded = false;
         s_svc_eep_block_state[i].dirty  = false;
-        s_svc_eep_block_state[i].valid  = false;
     }
 
     s_initialized = true;
@@ -138,6 +135,7 @@ dev_err_t svc_eep_init(void)
 
 dev_err_t svc_eep_deinit(void)
 {
+    dev_err_t result;
     uint8_t i;
 
     if (!s_initialized)
@@ -145,16 +143,21 @@ dev_err_t svc_eep_deinit(void)
         return DEV_ERR_NOT_INITIALIZED;
     }
 
-    /* Clear block states */
+    /* Deinitialize dev_eep first — if this fails, service state
+     * (including dirty flags) must be preserved so the caller can
+     * retry or take corrective action. */
+    result = dev_eep_deinit(DEV_EEP_MAIN);
+    if (result != DEV_OK)
+    {
+        return result;
+    }
+
+    /* Clear block states only after successful driver deinit */
     for (i = 0U; i < SVC_EEP_BLOCK_COUNT; i++)
     {
         s_svc_eep_block_state[i].loaded = false;
         s_svc_eep_block_state[i].dirty  = false;
-        s_svc_eep_block_state[i].valid  = false;
     }
-
-    /* Deinitialize dev_eep without syncing */
-    (void)dev_eep_deinit(DEV_EEP_MAIN);
 
     s_initialized = false;
     return DEV_OK;
@@ -179,14 +182,18 @@ dev_err_t svc_eep_shutdown(void)
 #endif
 
     /* Deinitialize dev_eep */
-    (void)dev_eep_deinit(DEV_EEP_MAIN);
+    result = dev_eep_deinit(DEV_EEP_MAIN);
+    if (result != DEV_OK)
+    {
+        /* Service state remains initialized; deinit failed */
+        return result;
+    }
 
     /* Clear block states */
     for (i = 0U; i < SVC_EEP_BLOCK_COUNT; i++)
     {
         s_svc_eep_block_state[i].loaded = false;
         s_svc_eep_block_state[i].dirty  = false;
-        s_svc_eep_block_state[i].valid  = false;
     }
 
     s_initialized = false;
@@ -210,26 +217,33 @@ dev_err_t svc_eep_load_block(svc_eep_block_id_t block_id)
         return DEV_ERR_NOT_INITIALIZED;
     }
 
-    if (block_id >= SVC_EEP_BLOCK_COUNT)
+    if (!svc_eep_block_id_is_valid(block_id))
     {
         return DEV_ERR_INVALID_ARG;
     }
 
-    cfg = svc_eep_find_block_cfg(block_id);
+    cfg = svc_eep_get_block_cfg(block_id);
     DEV_CHECK_RET((cfg != NULL), DEV_ERR_INVALID_ARG);
+
+    /* Reject loading from EEPROM if mirror has unsaved changes.
+     * Loading would silently overwrite dirty data. Caller must
+     * sync or discard via svc_eep_sync_block() first. */
+    if (s_svc_eep_block_state[block_id].dirty)
+    {
+        return DEV_ERR_INVALID_STATE;
+    }
 
     /* Read only this block from EEPROM */
     result = dev_eep_read(DEV_EEP_MAIN,
-                          cfg->eep_offset,
+                          cfg->info.eep_offset,
                           cfg->mirror,
-                          (uint32_t)cfg->block_size);
+                          (uint32_t)cfg->info.block_size);
     if (result != DEV_OK)
     {
         return result;
     }
 
     s_svc_eep_block_state[block_id].loaded = true;
-    s_svc_eep_block_state[block_id].valid  = true;
     s_svc_eep_block_state[block_id].dirty  = false;
 
     return DEV_OK;
@@ -249,17 +263,17 @@ dev_err_t svc_eep_read_block(svc_eep_block_id_t block_id,
         return DEV_ERR_NOT_INITIALIZED;
     }
 
-    if (block_id >= SVC_EEP_BLOCK_COUNT)
+    if (!svc_eep_block_id_is_valid(block_id))
     {
         return DEV_ERR_INVALID_ARG;
     }
 
     DEV_CHECK_PTR_RET(data);
 
-    cfg = svc_eep_find_block_cfg(block_id);
+    cfg = svc_eep_get_block_cfg(block_id);
     DEV_CHECK_RET((cfg != NULL), DEV_ERR_INVALID_ARG);
 
-    if (length != cfg->block_size)
+    if (length != cfg->info.block_size)
     {
         return DEV_ERR_INVALID_ARG;
     }
@@ -274,7 +288,7 @@ dev_err_t svc_eep_read_block(svc_eep_block_id_t block_id,
         }
     }
 
-    (void)memcpy(data, cfg->mirror, (size_t)cfg->block_size);
+    (void)memcpy(data, cfg->mirror, (size_t)cfg->info.block_size);
 
     return DEV_OK;
 }
@@ -293,26 +307,26 @@ dev_err_t svc_eep_write_direct(svc_eep_block_id_t block_id,
         return DEV_ERR_NOT_INITIALIZED;
     }
 
-    if (block_id >= SVC_EEP_BLOCK_COUNT)
+    if (!svc_eep_block_id_is_valid(block_id))
     {
         return DEV_ERR_INVALID_ARG;
     }
 
     DEV_CHECK_PTR_RET(data);
 
-    cfg = svc_eep_find_block_cfg(block_id);
+    cfg = svc_eep_get_block_cfg(block_id);
     DEV_CHECK_RET((cfg != NULL), DEV_ERR_INVALID_ARG);
 
-    if (length != cfg->block_size)
+    if (length != cfg->info.block_size)
     {
         return DEV_ERR_INVALID_ARG;
     }
 
     /* Write directly to EEPROM */
     result = dev_eep_write(DEV_EEP_MAIN,
-                           cfg->eep_offset,
+                           cfg->info.eep_offset,
                            (const uint8_t *)data,
-                           (uint32_t)cfg->block_size);
+                           (uint32_t)cfg->info.block_size);
     if (result != DEV_OK)
     {
         return result;
@@ -321,16 +335,14 @@ dev_err_t svc_eep_write_direct(svc_eep_block_id_t block_id,
     /* If mirror is loaded, update it and mark clean */
     if (s_svc_eep_block_state[block_id].loaded)
     {
-        (void)memcpy(cfg->mirror, data, (size_t)cfg->block_size);
+        (void)memcpy(cfg->mirror, data, (size_t)cfg->info.block_size);
         s_svc_eep_block_state[block_id].dirty = false;
-        s_svc_eep_block_state[block_id].valid = true;
     }
     else
     {
         /* Mark as loaded with the written data in mirror */
-        (void)memcpy(cfg->mirror, data, (size_t)cfg->block_size);
+        (void)memcpy(cfg->mirror, data, (size_t)cfg->info.block_size);
         s_svc_eep_block_state[block_id].loaded = true;
-        s_svc_eep_block_state[block_id].valid  = true;
         s_svc_eep_block_state[block_id].dirty  = false;
     }
 
@@ -350,26 +362,25 @@ dev_err_t svc_eep_write_mirror(svc_eep_block_id_t block_id,
         return DEV_ERR_NOT_INITIALIZED;
     }
 
-    if (block_id >= SVC_EEP_BLOCK_COUNT)
+    if (!svc_eep_block_id_is_valid(block_id))
     {
         return DEV_ERR_INVALID_ARG;
     }
 
     DEV_CHECK_PTR_RET(data);
 
-    cfg = svc_eep_find_block_cfg(block_id);
+    cfg = svc_eep_get_block_cfg(block_id);
     DEV_CHECK_RET((cfg != NULL), DEV_ERR_INVALID_ARG);
 
-    if (length != cfg->block_size)
+    if (length != cfg->info.block_size)
     {
         return DEV_ERR_INVALID_ARG;
     }
 
     /* Copy data to mirror only — do not write EEPROM */
-    (void)memcpy(cfg->mirror, data, (size_t)cfg->block_size);
+    (void)memcpy(cfg->mirror, data, (size_t)cfg->info.block_size);
 
     s_svc_eep_block_state[block_id].loaded = true;
-    s_svc_eep_block_state[block_id].valid  = true;
     s_svc_eep_block_state[block_id].dirty  = true;
 
     return DEV_OK;
@@ -389,7 +400,7 @@ dev_err_t svc_eep_get_mirror_ptr(svc_eep_block_id_t block_id,
         return DEV_ERR_NOT_INITIALIZED;
     }
 
-    if (block_id >= SVC_EEP_BLOCK_COUNT)
+    if (!svc_eep_block_id_is_valid(block_id))
     {
         return DEV_ERR_INVALID_ARG;
     }
@@ -397,7 +408,7 @@ dev_err_t svc_eep_get_mirror_ptr(svc_eep_block_id_t block_id,
     DEV_CHECK_PTR_RET(ptr);
     DEV_CHECK_PTR_RET(length);
 
-    cfg = svc_eep_find_block_cfg(block_id);
+    cfg = svc_eep_get_block_cfg(block_id);
     DEV_CHECK_RET((cfg != NULL), DEV_ERR_INVALID_ARG);
 
     /* Load block on demand if not already loaded */
@@ -411,7 +422,7 @@ dev_err_t svc_eep_get_mirror_ptr(svc_eep_block_id_t block_id,
     }
 
     *ptr    = (void *)cfg->mirror;
-    *length = cfg->block_size;
+    *length = cfg->info.block_size;
 
     return DEV_OK;
 }
@@ -423,7 +434,7 @@ dev_err_t svc_eep_mark_dirty(svc_eep_block_id_t block_id)
         return DEV_ERR_NOT_INITIALIZED;
     }
 
-    if (block_id >= SVC_EEP_BLOCK_COUNT)
+    if (!svc_eep_block_id_is_valid(block_id))
     {
         return DEV_ERR_INVALID_ARG;
     }
@@ -450,12 +461,12 @@ dev_err_t svc_eep_sync_block(svc_eep_block_id_t block_id)
         return DEV_ERR_NOT_INITIALIZED;
     }
 
-    if (block_id >= SVC_EEP_BLOCK_COUNT)
+    if (!svc_eep_block_id_is_valid(block_id))
     {
         return DEV_ERR_INVALID_ARG;
     }
 
-    cfg = svc_eep_find_block_cfg(block_id);
+    cfg = svc_eep_get_block_cfg(block_id);
     DEV_CHECK_RET((cfg != NULL), DEV_ERR_INVALID_ARG);
 
     /* Nothing to sync if not dirty */
@@ -466,9 +477,9 @@ dev_err_t svc_eep_sync_block(svc_eep_block_id_t block_id)
 
     /* Write mirror to EEPROM */
     result = dev_eep_write(DEV_EEP_MAIN,
-                           cfg->eep_offset,
+                           cfg->info.eep_offset,
                            cfg->mirror,
-                           (uint32_t)cfg->block_size);
+                           (uint32_t)cfg->info.block_size);
     if (result != DEV_OK)
     {
         return result;
@@ -509,7 +520,7 @@ dev_err_t svc_eep_sync_all(void)
 
 bool svc_eep_is_block_loaded(svc_eep_block_id_t block_id)
 {
-    if (block_id >= SVC_EEP_BLOCK_COUNT)
+    if (!svc_eep_block_id_is_valid(block_id))
     {
         return false;
     }
@@ -519,7 +530,7 @@ bool svc_eep_is_block_loaded(svc_eep_block_id_t block_id)
 
 bool svc_eep_is_block_dirty(svc_eep_block_id_t block_id)
 {
-    if (block_id >= SVC_EEP_BLOCK_COUNT)
+    if (!svc_eep_block_id_is_valid(block_id))
     {
         return false;
     }
